@@ -150,6 +150,8 @@ class _SavingsGoalsScreenState extends State<SavingsGoalsScreen> {
 
     user.savingsBalance -= amount;
     await DataService.updateUser(user);
+    // Refresh the in-memory user so all screens show the updated balance.
+    AppState.instance.currentUser = user;
 
     goal.currentAmount += amount;
     final allGoals = await DataService.getSavingsGoals(user.username);

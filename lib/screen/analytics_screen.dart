@@ -195,9 +195,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         case 'food':
           color = Colors.orange;
           break;
-        case 'transfer':
-          color = Colors.teal;
-          break;
         default:
           color = Colors.grey;
       }
@@ -231,10 +228,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       case 'food':
         color = Colors.orange;
         icon = Icons.restaurant;
-        break;
-      case 'transfer':
-        color = Colors.teal;
-        icon = Icons.swap_horiz;
         break;
       default:
         color = Colors.grey;

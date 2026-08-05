@@ -78,15 +78,7 @@ class _TransferScreenState extends State<TransferScreen> {
     final user = AppState.instance.currentUser;
     if (user == null) return;
 
-    final fromBalance = _from == _TransferFrom.savings
-        ? user.savingsBalance
-        : user.checkingBalance;
     final fromLabel = _from == _TransferFrom.savings ? 'Savings' : 'Checking';
-
-    if (fromBalance < amt) {
-      _showSnack('Insufficient balance in $fromLabel account.');
-      return;
-    }
 
     showDialog(
       context: context,
