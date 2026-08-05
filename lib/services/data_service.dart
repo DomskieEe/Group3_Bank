@@ -530,15 +530,15 @@ class DataService {
   // ── BUDGETS ──────────────────────────────────────────────────────────────
 
   static Future<Map<String, double>> getBudgets(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    if (raw == null) return {};
-    final all = jsonDecode(raw) as Map<String, dynamic>;
-    final userBudgets = (all[username] as Map?) ?? {};
-    return userBudgets.map(
-      (category, amount) =>
-          MapEntry(category.toString(), (amount as num).toDouble()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return {};
+
+    final snapshot = await user.collection('budgets').get();
+
+    return {
+      for (final doc in snapshot.docs)
+        doc.id: (doc['amount'] as num).toDouble(),
+    };
   }
 
   static Future<void> setBudget(
@@ -546,21 +546,18 @@ class DataService {
     String category,
     double amount,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    final all = raw == null
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    final userBudgets = Map<String, dynamic>.from(
-      (all[username] as Map?) ?? <String, dynamic>{},
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
     if (amount <= 0) {
-      userBudgets.remove(category);
+      await user.collection('budgets').doc(category).delete();
     } else {
-      userBudgets[category] = amount;
+      await user.collection('budgets').doc(category).set({
+        'category': category,
+        'amount': amount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
-    all[username] = userBudgets;
-    await prefs.setString(_budgetsKey, jsonEncode(all));
   }
 
   // ── BILL REMINDERS ───────────────────────────────────────────────────────
@@ -1042,6 +1039,7 @@ class DataService {
         .toList();
   }
 
+  // Unused
   static Future<void> _saveAllCards(List<BankCard> allCards) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
