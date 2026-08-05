@@ -1,25 +1,36 @@
 import 'package:flutter/material.dart';
+import '../models/notification_item.dart';
+import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
-import '../models/transaction_model.dart';
-import '../models/notification_item.dart';
+import 'qr_scanner_screen.dart';
 
 enum _TransferFrom { savings, checking }
 
 class TransferScreen extends StatefulWidget {
-  const TransferScreen({super.key});
+  final String? initialRecipient;
+  const TransferScreen({super.key, this.initialRecipient});
 
   @override
   State<TransferScreen> createState() => _TransferScreenState();
 }
 
 class _TransferScreenState extends State<TransferScreen> {
-  final _acctCtrl = TextEditingController();
+  late final TextEditingController _acctCtrl;
   final _amtCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
   String _transferType = 'Own Account';
   _TransferFrom _from = _TransferFrom.savings;
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _acctCtrl = TextEditingController(text: widget.initialRecipient);
+    if (widget.initialRecipient != null) {
+      _transferType = 'Other User';
+    }
+  }
 
   @override
   void dispose() {
@@ -147,10 +158,10 @@ class _TransferScreenState extends State<TransferScreen> {
 
   // ignore: unused_element
   Future<void> _processTransfer(
-    double amount,
-    String targetAcct,
-    String note,
-  ) async {
+      double amount,
+      String targetAcct,
+      String note,
+      ) async {
     setState(() => _loading = true);
     final user = AppState.instance.currentUser!;
 
@@ -266,7 +277,7 @@ class _TransferScreenState extends State<TransferScreen> {
         username: user.username,
         title: 'Transfer Successful',
         message:
-            '${DataService.formatCurrency(amount)} sent from $fromLabel to $targetAcct.',
+        '${DataService.formatCurrency(amount)} sent from $fromLabel to $targetAcct.',
         type: 'success',
         date: DataService.formatDate(DateTime.now()),
       ),
@@ -302,7 +313,7 @@ class _TransferScreenState extends State<TransferScreen> {
         username: recipient.username,
         title: 'Incoming Transfer',
         message:
-            'You received ${DataService.formatCurrency(amount)} from ${user.fullName}.',
+        'You received ${DataService.formatCurrency(amount)} from ${user.fullName}.',
         type: 'success',
         date: DataService.formatDate(DateTime.now()),
       ),
@@ -341,7 +352,7 @@ class _TransferScreenState extends State<TransferScreen> {
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                border: Border.all(color: Colors.grey.withOpacity(0.3)),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
@@ -380,7 +391,8 @@ class _TransferScreenState extends State<TransferScreen> {
                     label: 'Checking',
                     balance: user.checkingBalance,
                     selected: _from == _TransferFrom.checking,
-                    onTap: () => setState(() => _from = _TransferFrom.checking),
+                    onTap: () =>
+                        setState(() => _from = _TransferFrom.checking),
                   ),
                 ),
               ],
@@ -404,6 +416,26 @@ class _TransferScreenState extends State<TransferScreen> {
                   borderSide: BorderSide.none,
                 ),
                 prefixIcon: const Icon(Icons.account_balance),
+                suffixIcon: IconButton(
+                  icon: const Icon(
+                    Icons.qr_code_scanner,
+                    color: Color(0xFFD32F2F),
+                  ),
+                  onPressed: () async {
+                    final result = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const QrScannerScreen(),
+                      ),
+                    );
+                    if (result != null && mounted) {
+                      setState(() {
+                        _acctCtrl.text = result;
+                        _transferType = 'Other User';
+                      });
+                    }
+                  },
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -467,20 +499,20 @@ class _TransferScreenState extends State<TransferScreen> {
                 ),
                 child: _loading
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
                     : const Text(
-                        'CONFIRM TRANSFER',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                  'CONFIRM TRANSFER',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
               ),
             ),
           ],
@@ -502,13 +534,13 @@ class _TransferScreenState extends State<TransferScreen> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFFD32F2F).withValues(alpha: 0.1)
+              ? const Color(0xFFD32F2F).withOpacity(0.1)
               : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
                 ? const Color(0xFFD32F2F)
-                : Colors.grey.withValues(alpha: 0.3),
+                : Colors.grey.withOpacity(0.3),
             width: selected ? 2 : 1,
           ),
         ),
@@ -525,7 +557,8 @@ class _TransferScreenState extends State<TransferScreen> {
             const SizedBox(height: 6),
             Text(
               DataService.formatCurrency(balance),
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ],
         ),

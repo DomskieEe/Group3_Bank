@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
-import 'dashboard_screen.dart';
-import 'accounts_screen.dart';
-import 'transfer_screen.dart';
-import 'cards_screen.dart';
-import 'analytics_screen.dart';
-import 'bills_screen.dart';
-import 'notifications_screen.dart';
-import 'profile_screen.dart';
-import 'settings_screen.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
+import 'accounts_screen.dart';
+import 'analytics_screen.dart';
+import 'bills_screen.dart';
+import 'cards_screen.dart';
+import 'dashboard_screen.dart';
+import 'notifications_screen.dart';
+import 'profile_screen.dart';
+import 'qr_scanner_screen.dart';
+import 'settings_screen.dart';
+import 'transfer_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -23,8 +24,8 @@ class _MainShellState extends State<MainShell> {
 
   final List<Widget> _screens = [
     const DashboardScreen(),
-    const AccountsScreen(),
     const TransferScreen(),
+    const QrScannerScreen(isStandalone: false),
     const CardsScreen(),
     const _MoreScreen(),
   ];
@@ -45,20 +46,26 @@ class _MainShellState extends State<MainShell> {
         selectedItemColor: const Color(0xFFD32F2F),
         unselectedItemColor: Colors.grey,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.account_balance_wallet),
-            label: 'Accounts',
+            icon: Icon(Icons.home),
+            label: 'Home',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.swap_horiz),
             label: 'Transfer',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.qr_code_scanner),
+            label: 'Scan',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.credit_card),
             label: 'Cards',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.menu), label: 'More'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.menu),
+            label: 'More',
+          ),
         ],
       ),
     );
@@ -75,7 +82,22 @@ class _MoreScreen extends StatelessWidget {
       body: ListView(
         children: [
           ListTile(
-            leading: const Icon(Icons.insights, color: Color(0xFFD32F2F)),
+            leading: const Icon(
+              Icons.account_balance_wallet,
+              color: Color(0xFFD32F2F),
+            ),
+            title: const Text('My Accounts'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AccountsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.insights,
+              color: Color(0xFFD32F2F),
+            ),
             title: const Text('Analytics & Budget'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
@@ -84,7 +106,10 @@ class _MoreScreen extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.receipt_long, color: Color(0xFFD32F2F)),
+            leading: const Icon(
+              Icons.receipt_long,
+              color: Color(0xFFD32F2F),
+            ),
             title: const Text('Pay Bills'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
@@ -92,13 +117,16 @@ class _MoreScreen extends StatelessWidget {
               MaterialPageRoute(
                 builder: (_) => BillsScreen(
                   currentBalance:
-                      AppState.instance.currentUser?.totalBalance ?? 0,
+                  AppState.instance.currentUser?.totalBalance ?? 0,
                 ),
               ),
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.notifications, color: Color(0xFFD32F2F)),
+            leading: const Icon(
+              Icons.notifications,
+              color: Color(0xFFD32F2F),
+            ),
             title: const Text('Notifications'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
@@ -108,7 +136,10 @@ class _MoreScreen extends StatelessWidget {
           ),
           const Divider(),
           ListTile(
-            leading: const Icon(Icons.person, color: Color(0xFFD32F2F)),
+            leading: const Icon(
+              Icons.person,
+              color: Color(0xFFD32F2F),
+            ),
             title: const Text('My Profile'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
@@ -117,7 +148,10 @@ class _MoreScreen extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.settings, color: Color(0xFFD32F2F)),
+            leading: const Icon(
+              Icons.settings,
+              color: Color(0xFFD32F2F),
+            ),
             title: const Text('Settings'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
