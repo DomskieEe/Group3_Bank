@@ -46,7 +46,7 @@ class _CardsScreenState extends State<CardsScreen> {
   }
 
   Future<void> _showAddCardDialog() async {
-    String? selectedType = await showDialog<String>(
+    final String? selectedType = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
         title: const Text('Choose Card Type'),
@@ -84,13 +84,13 @@ class _CardsScreenState extends State<CardsScreen> {
   }
 
   Widget _dialogOption(
-    BuildContext ctx,
-    String type,
-    IconData icon,
-    String title,
-    String subtitle,
-    Color color,
-  ) {
+      BuildContext ctx,
+      String type,
+      IconData icon,
+      String title,
+      String subtitle,
+      Color color,
+      ) {
     return SimpleDialogOption(
       onPressed: () => Navigator.pop(ctx, type),
       child: Padding(
@@ -158,9 +158,6 @@ class _CardsScreenState extends State<CardsScreen> {
     if (user == null) return;
 
     final allTx = await DataService.getTransactions(user.username);
-    // Transactions are not yet linked to individual card IDs.
-    // Until card-level tracking is implemented, the 10 most recent
-    // account transactions are shown as a proxy for card history.
     final recent = allTx.take(10).toList();
 
     if (!mounted) return;
@@ -207,33 +204,33 @@ class _CardsScreenState extends State<CardsScreen> {
               child: recent.isEmpty
                   ? const Center(child: Text('No transactions yet.'))
                   : ListView.builder(
-                      controller: scroll,
-                      itemCount: recent.length,
-                      itemBuilder: (_, i) {
-                        final tx = recent[i];
-                        final isCredit = tx.type == 'credit';
-                        return ListTile(
-                          title: Text(
-                            tx.description,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          subtitle: Text(
-                            tx.date,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: Text(
-                            '${isCredit ? '+' : '-'} ${DataService.formatCurrency(tx.amount)}',
-                            style: TextStyle(
-                              color: isCredit ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        );
-                      },
+                controller: scroll,
+                itemCount: recent.length,
+                itemBuilder: (_, i) {
+                  final tx = recent[i];
+                  final isCredit = tx.type == 'credit';
+                  return ListTile(
+                    title: Text(
+                      tx.description,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
+                    subtitle: Text(
+                      tx.date,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    trailing: Text(
+                      '${isCredit ? '+' : '-'} ${DataService.formatCurrency(tx.amount)}',
+                      style: TextStyle(
+                        color: isCredit ? Colors.green : Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -269,9 +266,9 @@ class _CardsScreenState extends State<CardsScreen> {
                 label: DataService.formatCurrency(currentLimit),
                 onChanged: (val) => setModalState(() => currentLimit = val),
               ),
-              Row(
+              const Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
+                children: [
                   Text(
                     '₱5,000',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
@@ -327,50 +324,50 @@ class _CardsScreenState extends State<CardsScreen> {
       appBar: AppBar(title: const Text('My Cards')),
       body: _cards.isEmpty
           ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.credit_card_off,
-                    size: 64,
-                    color: Colors.grey.withValues(alpha: 0.5),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No cards found.',
-                    style: TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _showAddCardDialog,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD32F2F),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 14,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Apply for a Card'),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(20),
-              itemCount: _cards.length,
-              itemBuilder: (ctx, i) => _buildCardItem(_cards[i]),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.credit_card_off,
+              size: 64,
+              color: Colors.grey.withValues(alpha: 0.5),
             ),
+            const SizedBox(height: 16),
+            const Text(
+              'No cards found.',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _showAddCardDialog,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD32F2F),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Apply for a Card'),
+            ),
+          ],
+        ),
+      )
+          : ListView.builder(
+        padding: const EdgeInsets.all(20),
+        itemCount: _cards.length,
+        itemBuilder: (ctx, i) => _buildCardItem(_cards[i]),
+      ),
       floatingActionButton: _cards.isNotEmpty
           ? FloatingActionButton(
-              onPressed: _showAddCardDialog,
-              backgroundColor: const Color(0xFFD32F2F),
-              child: const Icon(Icons.add, color: Colors.white),
-            )
+        onPressed: _showAddCardDialog,
+        backgroundColor: const Color(0xFFD32F2F),
+        child: const Icon(Icons.add, color: Colors.white),
+      )
           : null,
     );
   }

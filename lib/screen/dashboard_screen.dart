@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import '../models/notification_item.dart';
+import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
-import '../models/transaction_model.dart';
-import '../models/notification_item.dart';
-import 'transaction_history_screen.dart';
+import 'accounts_screen.dart';
 import 'notifications_screen.dart';
 import 'profile_screen.dart';
+import 'transaction_history_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -45,7 +46,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cash In / Deposit'),
+        title: Row(
+          children: const [
+            Icon(Icons.add_card, color: Color(0xFFD32F2F)),
+            SizedBox(width: 8),
+            Text('Cash In / Deposit'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -120,7 +127,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       username: user.username,
       title: 'Deposit Successful',
       message:
-          '${DataService.formatCurrency(amount)} has been deposited to your Savings account.',
+      '${DataService.formatCurrency(amount)} has been deposited to your Savings account.',
       type: 'success',
       date: DataService.formatDate(DateTime.now()),
     );
@@ -151,7 +158,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       catTotals[tx.category] = (catTotals[tx.category] ?? 0) + tx.amount;
     }
     final topCat = catTotals.entries.reduce(
-      (a, b) => a.value > b.value ? a : b,
+          (a, b) => a.value > b.value ? a : b,
     );
     final totalSpent = debits.fold(0.0, (sum, t) => sum + t.amount);
     return '📊 You\'ve spent ${DataService.formatCurrency(totalSpent)} recently. '
@@ -188,8 +195,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Text(
                           'Welcome back,',
                           style: TextStyle(
-                            color: Theme.of(context).textTheme.bodyMedium?.color
-                                ?.withValues(alpha: 0.7),
+                            color: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.color
+                                ?.withOpacity(0.7),
                           ),
                         ),
                         Text(
@@ -257,98 +267,141 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 24),
 
                 // ─── Balance Card ───────────────────────────────────────────
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFD32F2F), Colors.black],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFD32F2F).withValues(alpha: 0.3),
-                        blurRadius: 15,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AccountsScreen()),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Total Balance',
-                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFD32F2F), Colors.black],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        DataService.formatCurrency(user.totalBalance),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 34,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFD32F2F).withOpacity(0.3),
+                          blurRadius: 15,
+                          offset: const Offset(0, 8),
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildMiniBalance('Savings', user.savingsBalance),
-                          Container(
-                            width: 1,
-                            height: 30,
-                            color: Colors.white24,
-                          ),
-                          _buildMiniBalance('Checking', user.checkingBalance),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _showCashInDialog,
-                          icon: const Icon(
-                            Icons.add_circle,
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.account_balance_wallet_outlined,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Total Balance',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 16),
+                            ),
+                            Spacer(),
+                            Icon(Icons.chevron_right,
+                                color: Colors.white54, size: 20),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          DataService.formatCurrency(user.totalBalance),
+                          style: const TextStyle(
                             color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 34,
                           ),
-                          label: const Text(
-                            'Cash In',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.white54),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildMiniBalance(
+                              'Savings',
+                              user.savingsBalance,
+                              Icons.savings_outlined,
+                            ),
+                            Container(
+                              width: 1,
+                              height: 30,
+                              color: Colors.white24,
+                            ),
+                            _buildMiniBalance(
+                              'Checking',
+                              user.checkingBalance,
+                              Icons.credit_card_outlined,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _showCashInDialog,
+                            icon: const Icon(
+                              Icons.add_circle,
+                              color: Colors.white,
+                            ),
+                            label: const Text(
+                              'Cash In',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.white54),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 32),
 
-                // ─── Recent Transactions ─────────────────────────────────────
+                // ─── Recent Transactions Header ──────────────────────────────
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Recent Transactions',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.history,
+                          color: Color(0xFFD32F2F),
+                          size: 22,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Recent Transactions',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    TextButton(
+                    TextButton.icon(
                       onPressed: () => Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => const TransactionHistoryScreen(),
                         ),
                       ),
-                      child: const Text(
+                      icon: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 12,
+                        color: Color(0xFFD32F2F),
+                      ),
+                      label: const Text(
                         'See All',
                         style: TextStyle(color: Color(0xFFD32F2F)),
                       ),
@@ -372,10 +425,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                 const SizedBox(height: 32),
 
-                // ─── AI Insights ─────────────────────────────────────────────
-                const Text(
-                  'AI Insights',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                // ─── AI Insights Header ─────────────────────────────────────
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.auto_graph,
+                      color: Color(0xFFD32F2F),
+                      size: 22,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'AI Insights',
+                      style:
+                      TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 Container(
@@ -384,7 +448,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: Colors.grey.withValues(alpha: 0.2),
+                      color: Colors.grey.withOpacity(0.2),
                     ),
                   ),
                   child: Row(
@@ -399,9 +463,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: Text(
                           _buildInsight(),
                           style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.color,
+                            color:
+                            Theme.of(context).textTheme.bodyMedium?.color,
                           ),
                         ),
                       ),
@@ -417,13 +480,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildMiniBalance(String label, double amount) {
+  Widget _buildMiniBalance(String label, double amount, IconData icon) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        Row(
+          children: [
+            Icon(
+              icon,
+              color: Colors.white70,
+              size: 14,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text(
@@ -474,14 +547,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.withValues(alpha: 0.1)),
+        side: BorderSide(color: Colors.grey.withOpacity(0.1)),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding:
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: iconColor.withValues(alpha: 0.1),
+            color: iconColor.withOpacity(0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(icon, color: iconColor),

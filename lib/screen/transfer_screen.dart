@@ -1,23 +1,36 @@
 import 'package:flutter/material.dart';
+import '../models/notification_item.dart';
+import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
+import 'qr_scanner_screen.dart';
 
 enum _TransferFrom { savings, checking }
 
 class TransferScreen extends StatefulWidget {
-  const TransferScreen({super.key});
+  final String? initialRecipient;
+  const TransferScreen({super.key, this.initialRecipient});
 
   @override
   State<TransferScreen> createState() => _TransferScreenState();
 }
 
 class _TransferScreenState extends State<TransferScreen> {
-  final _acctCtrl = TextEditingController();
+  late final TextEditingController _acctCtrl;
   final _amtCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
   String _transferType = 'Own Account';
   _TransferFrom _from = _TransferFrom.savings;
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _acctCtrl = TextEditingController(text: widget.initialRecipient);
+    if (widget.initialRecipient != null) {
+      _transferType = 'Other User';
+    }
+  }
 
   @override
   void dispose() {
@@ -135,6 +148,179 @@ class _TransferScreenState extends State<TransferScreen> {
     _showSnack('Transfer successful!');
   }
 
+  // ignore: unused_element
+  Future<void> _processTransfer(
+      double amount,
+      String targetAcct,
+      String note,
+      ) async {
+    setState(() => _loading = true);
+    final user = AppState.instance.currentUser!;
+
+    // ── Own Account transfer ──────────────────────────────────────────────────
+    if (_transferType == 'Own Account') {
+      final String expectedTarget;
+      final String fromLabel;
+      final String toLabel;
+
+      if (_from == _TransferFrom.savings) {
+        expectedTarget = user.checkingAccountNumber;
+        fromLabel = 'Savings';
+        toLabel = 'Checking';
+      } else {
+        expectedTarget = user.accountNumber;
+        fromLabel = 'Checking';
+        toLabel = 'Savings';
+      }
+
+      if (targetAcct != expectedTarget) {
+        setState(() => _loading = false);
+        _showSnack('Invalid account number. Check your Accounts screen.');
+        return;
+      }
+
+      if (_from == _TransferFrom.savings) {
+        user.savingsBalance -= amount;
+        user.checkingBalance += amount;
+      } else {
+        user.checkingBalance -= amount;
+        user.savingsBalance += amount;
+      }
+      await DataService.updateUser(user);
+      if (!mounted) return;
+
+      final debitTx = TransactionModel(
+        id: DataService.generateId(),
+        username: user.username,
+        type: 'debit',
+        category: 'transfer',
+        description: 'Transfer $fromLabel → $toLabel',
+        amount: amount,
+        date: DataService.formatDate(DateTime.now()),
+        note: note,
+      );
+      final creditTx = TransactionModel(
+        id: DataService.generateId(),
+        username: user.username,
+        type: 'credit',
+        category: 'transfer',
+        description: 'Transfer $fromLabel → $toLabel',
+        amount: amount,
+        date: DataService.formatDate(DateTime.now()),
+        note: note,
+      );
+      await DataService.addTransaction(debitTx);
+      await DataService.addTransaction(creditTx);
+
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _acctCtrl.clear();
+        _amtCtrl.clear();
+        _noteCtrl.clear();
+      });
+      _showSnack('${DataService.formatCurrency(amount)} moved to $toLabel!');
+      return;
+    }
+
+    // ── Other User / Other Bank ───────────────────────────────────────────────
+    final recipient = await DataService.getUserByAccountNumber(targetAcct);
+    if (!mounted) return;
+
+    if (recipient == null) {
+      setState(() => _loading = false);
+      _showSnack('Account number not found. Transfer cancelled.');
+      return;
+    }
+    if (recipient.username == user.username) {
+      setState(() => _loading = false);
+      _showSnack('Use "Own Account" type to transfer between your accounts.');
+      return;
+    }
+
+    // Deduct from sender
+    if (_from == _TransferFrom.savings) {
+      user.savingsBalance -= amount;
+    } else {
+      user.checkingBalance -= amount;
+    }
+    await DataService.updateUser(user);
+    if (!mounted) return;
+
+    final fromLabel = _from == _TransferFrom.savings ? 'Savings' : 'Checking';
+
+    await DataService.addTransaction(
+      TransactionModel(
+        id: DataService.generateId(),
+        username: user.username,
+        type: 'debit',
+        category: 'transfer',
+        description: 'Transfer to $targetAcct',
+        amount: amount,
+        date: DataService.formatDate(DateTime.now()),
+        note: note,
+      ),
+    );
+
+    await DataService.addNotification(
+      NotificationItem(
+        id: DataService.generateId(),
+        username: user.username,
+        title: 'Transfer Successful',
+        message:
+        '${DataService.formatCurrency(amount)} sent from $fromLabel to $targetAcct.',
+        type: 'success',
+        date: DataService.formatDate(DateTime.now()),
+      ),
+    );
+
+    // Credit the account number the sender selected.
+    final recipientAccountType = targetAcct == recipient.checkingAccountNumber
+        ? 'Checking'
+        : 'Savings';
+    if (recipientAccountType == 'Checking') {
+      recipient.checkingBalance += amount;
+    } else {
+      recipient.savingsBalance += amount;
+    }
+    await DataService.updateUser(recipient);
+
+    await DataService.addTransaction(
+      TransactionModel(
+        id: '${DataService.generateId()}_rx',
+        username: recipient.username,
+        type: 'credit',
+        category: 'transfer',
+        description: 'Received in $recipientAccountType from ${user.fullName}',
+        amount: amount,
+        date: DataService.formatDate(DateTime.now()),
+        note: note,
+      ),
+    );
+
+    await DataService.addNotification(
+      NotificationItem(
+        id: '${DataService.generateId()}_rx',
+        username: recipient.username,
+        title: 'Incoming Transfer',
+        message:
+        'You received ${DataService.formatCurrency(amount)} from ${user.fullName}.',
+        type: 'success',
+        date: DataService.formatDate(DateTime.now()),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _acctCtrl.clear();
+      _amtCtrl.clear();
+      _noteCtrl.clear();
+    });
+    _showSnack('Transfer Successful!');
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AppState.instance.currentUser;
@@ -158,7 +344,7 @@ class _TransferScreenState extends State<TransferScreen> {
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                border: Border.all(color: Colors.grey.withOpacity(0.3)),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
@@ -197,7 +383,8 @@ class _TransferScreenState extends State<TransferScreen> {
                     label: 'Checking',
                     balance: user.checkingBalance,
                     selected: _from == _TransferFrom.checking,
-                    onTap: () => setState(() => _from = _TransferFrom.checking),
+                    onTap: () =>
+                        setState(() => _from = _TransferFrom.checking),
                   ),
                 ),
               ],
@@ -221,6 +408,26 @@ class _TransferScreenState extends State<TransferScreen> {
                   borderSide: BorderSide.none,
                 ),
                 prefixIcon: const Icon(Icons.account_balance),
+                suffixIcon: IconButton(
+                  icon: const Icon(
+                    Icons.qr_code_scanner,
+                    color: Color(0xFFD32F2F),
+                  ),
+                  onPressed: () async {
+                    final result = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const QrScannerScreen(),
+                      ),
+                    );
+                    if (result != null && mounted) {
+                      setState(() {
+                        _acctCtrl.text = result;
+                        _transferType = 'Other User';
+                      });
+                    }
+                  },
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -284,20 +491,20 @@ class _TransferScreenState extends State<TransferScreen> {
                 ),
                 child: _loading
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
                     : const Text(
-                        'CONFIRM TRANSFER',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
+                  'CONFIRM TRANSFER',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
               ),
             ),
           ],
@@ -319,13 +526,13 @@ class _TransferScreenState extends State<TransferScreen> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: selected
-              ? const Color(0xFFD32F2F).withValues(alpha: 0.1)
+              ? const Color(0xFFD32F2F).withOpacity(0.1)
               : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
                 ? const Color(0xFFD32F2F)
-                : Colors.grey.withValues(alpha: 0.3),
+                : Colors.grey.withOpacity(0.3),
             width: selected ? 2 : 1,
           ),
         ),
@@ -342,7 +549,8 @@ class _TransferScreenState extends State<TransferScreen> {
             const SizedBox(height: 6),
             Text(
               DataService.formatCurrency(balance),
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ],
         ),
