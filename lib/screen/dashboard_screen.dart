@@ -108,7 +108,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       id: DataService.generateId(),
       username: user.username,
       type: 'credit',
-      category: 'salary',
+      category: 'deposit',
       description: 'Cash In / Deposit',
       amount: amount,
       date: DataService.formatDate(DateTime.now()),

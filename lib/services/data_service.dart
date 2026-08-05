@@ -11,7 +11,6 @@ import '../models/savings_goal.dart';
 import '../models/notification_item.dart';
 
 class DataService {
-  static const String _usersKey = 'ds_users';
   static const String _transactionsKey = 'ds_transactions';
   static const String _cardsKey = 'ds_cards';
   static const String _goalsKey = 'ds_savings_goals';
@@ -64,48 +63,6 @@ class DataService {
 
   static Future<void> _seedData(SharedPreferences prefs) async {
     final now = DateTime.now();
-
-    // USERS
-    final users = [
-      AppUser(
-        id: 1,
-        name: 'Admin',
-        surname: 'User',
-        middleName: 'A',
-        birthday: '1990-01-01',
-        username: 'admin',
-        password: 'Admin123',
-        email: 'admin@snapwallet.ph',
-        phone: '09171234567',
-        accountNumber: '1234-5678-9012',
-        checkingAccountNumber: '2109-8765-4321',
-        accountType: 'checking',
-        accountStatus: 'active',
-        savingsBalance: 50000.0,
-        checkingBalance: 25000.0,
-      ),
-      AppUser(
-        id: 2,
-        name: 'Dominic',
-        surname: 'Santos',
-        middleName: 'R',
-        birthday: '1998-05-14',
-        username: 'dominic',
-        password: 'pass123',
-        email: 'dominic@email.com',
-        phone: '09981234567',
-        accountNumber: '9876-5432-1098',
-        checkingAccountNumber: '8901-2345-6789',
-        accountType: 'savings',
-        accountStatus: 'active',
-        savingsBalance: 45750.0,
-        checkingBalance: 12500.0,
-      ),
-    ];
-    await prefs.setString(
-      _usersKey,
-      jsonEncode(users.map((u) => u.toJson()).toList()),
-    );
 
     // TRANSACTIONS
     String fd(int daysAgo) =>
@@ -474,20 +431,29 @@ class DataService {
   }
 
   static Future<AppUser?> getUserByAccountNumber(String accountNumber) async {
+    // Trim whitespace to handle copy-paste errors
+    final trimmed = accountNumber.trim();
+    
+    // Try matching against savings account (accountNumber field)
     final savingsMatch = await _users
-        .where('accountNumber', isEqualTo: accountNumber)
+        .where('accountNumber', isEqualTo: trimmed)
         .limit(1)
         .get();
     if (savingsMatch.docs.isNotEmpty) {
       return _userFromDocument(savingsMatch.docs.single);
     }
+    
+    // Try matching against checking account (checkingAccountNumber field)
     final checkingMatch = await _users
-        .where('checkingAccountNumber', isEqualTo: accountNumber)
+        .where('checkingAccountNumber', isEqualTo: trimmed)
         .limit(1)
         .get();
-    return checkingMatch.docs.isEmpty
-        ? null
-        : _userFromDocument(checkingMatch.docs.single);
+    if (checkingMatch.docs.isNotEmpty) {
+      return _userFromDocument(checkingMatch.docs.single);
+    }
+    
+    // Account not found in either field
+    return null;
   }
 
   static Future<AppUser?> getUserByUsername(String username) async {
@@ -496,8 +462,6 @@ class DataService {
     final document = await reference.get();
     return document.exists ? _userFromDocument(document) : null;
   }
-
-  static Future<void> saveSession(String username) async {}
 
   static Future<AppUser?> restoreSession() async {
     final firebaseUser = _auth.currentUser;
@@ -623,6 +587,11 @@ class DataService {
 
   /// Moves funds and creates both account histories in one Firestore transaction.
   /// Returns an error message when the transfer cannot be completed.
+  ///
+  /// All Firestore reads happen BEFORE writes inside the transaction,
+  /// which is required by the web SDK. The sender is resolved via the
+  /// authenticated user's UID directly (no extra query). The recipient
+  /// is found via account number queries before the transaction starts.
   static Future<String?> transferFunds({
     required String senderUsername,
     required String targetAccountNumber,
@@ -630,133 +599,152 @@ class DataService {
     required double amount,
     required String note,
   }) async {
-    final senderRef = await _userReference(senderUsername);
-    if (senderRef == null) return 'Your account could not be found.';
+    // ── Resolve sender ref (no query needed — use auth UID directly) ──────────
+    final currentAuthUser = _auth.currentUser;
+    if (currentAuthUser == null) return 'You are not logged in.';
+    final senderRef = _users.doc(currentAuthUser.uid);
 
-    final recipient = await getUserByAccountNumber(targetAccountNumber);
-    if (recipient == null) return 'Account number not found.';
-    final recipientRef = await _userReference(recipient.username);
-    if (recipientRef == null) return 'Recipient account could not be found.';
+    // ── Resolve recipient ref BEFORE the transaction (queries not allowed
+    //    inside transactions on web SDK) ────────────────────────────────────────
+    final trimmedTarget = targetAccountNumber.trim();
+    QuerySnapshot<Map<String, dynamic>> savingsMatch;
+    QuerySnapshot<Map<String, dynamic>> checkingMatch;
 
     try {
-      await _firestore.runTransaction((transaction) async {
-        final senderSnapshot = await transaction.get(senderRef);
-        final recipientSnapshot = recipientRef.path == senderRef.path
-            ? senderSnapshot
-            : await transaction.get(recipientRef);
-        final sender = senderSnapshot.data()!;
-        final receiver = recipientSnapshot.data()!;
-        final senderSavings = (sender['savingsBalance'] as num? ?? 0)
-            .toDouble();
-        final senderChecking = (sender['checkingBalance'] as num? ?? 0)
-            .toDouble();
+      savingsMatch = await _users
+          .where('accountNumber', isEqualTo: trimmedTarget)
+          .limit(1)
+          .get();
+      checkingMatch = savingsMatch.docs.isEmpty
+          ? await _users
+                .where('checkingAccountNumber', isEqualTo: trimmedTarget)
+                .limit(1)
+                .get()
+          : savingsMatch; // reuse — recipient found already
+    } on FirebaseException {
+      return 'Account number lookup failed. Please try again.';
+    }
+
+    final recipientDoc = savingsMatch.docs.isNotEmpty
+        ? savingsMatch.docs.single
+        : checkingMatch.docs.isNotEmpty
+        ? checkingMatch.docs.single
+        : null;
+
+    if (recipientDoc == null) return 'Account number not found.';
+    final recipientRef = recipientDoc.reference;
+
+    try {
+      await _firestore.runTransaction((txn) async {
+        // ── ALL reads must come before any writes (web SDK requirement) ────────
+        final senderSnap = await txn.get(senderRef);
+        final recipientSnap = recipientRef.path == senderRef.path
+            ? senderSnap
+            : await txn.get(recipientRef);
+
+        if (!senderSnap.exists) throw StateError('Your account could not be found.');
+
+        final sender = senderSnap.data()!;
+        final receiver = recipientSnap.data()!;
+
+        final senderSavings  = (sender['savingsBalance']  as num? ?? 0).toDouble();
+        final senderChecking = (sender['checkingBalance'] as num? ?? 0).toDouble();
         final available = fromSavings ? senderSavings : senderChecking;
+
         if (available < amount) {
           throw StateError(
             'Insufficient ${fromSavings ? 'Savings' : 'Checking'} balance.',
           );
         }
 
-        final isOwnAccount = senderRef.path == recipientRef.path;
+        final isOwnAccount = recipientRef.path == senderRef.path;
         final receiverUsesChecking =
-            targetAccountNumber == receiver['checkingAccountNumber'];
-        if (isOwnAccount && receiverUsesChecking == fromSavings) {
+            trimmedTarget == receiver['checkingAccountNumber'];
+
+        if (isOwnAccount && receiverUsesChecking != fromSavings) {
           throw StateError(
-            'Choose your other account for an own-account transfer.',
+            'Select your other account as the destination for an own-account transfer.',
           );
         }
 
         final now = formatDate(DateTime.now());
-        final senderName = '${sender['name'] ?? ''} ${sender['surname'] ?? ''}'
-            .trim();
+        final senderName =
+            '${sender['name'] ?? ''} ${sender['surname'] ?? ''}'.trim();
+
+        // ── ALL writes after all reads ─────────────────────────────────────────
         final senderUpdates = <String, dynamic>{
-          if (fromSavings) 'savingsBalance': senderSavings - amount,
+          if (fromSavings)  'savingsBalance':  senderSavings  - amount,
           if (!fromSavings) 'checkingBalance': senderChecking - amount,
         };
 
         if (isOwnAccount) {
-          senderUpdates[receiverUsesChecking
-                  ? 'checkingBalance'
-                  : 'savingsBalance'] =
-              (receiverUsesChecking ? senderChecking : senderSavings) + amount;
-          transaction.update(senderRef, senderUpdates);
+          // Credit the other account on the same document
+          final receiverSavings  = (receiver['savingsBalance']  as num? ?? 0).toDouble();
+          final receiverChecking = (receiver['checkingBalance'] as num? ?? 0).toDouble();
+          senderUpdates[receiverUsesChecking ? 'checkingBalance' : 'savingsBalance'] =
+              (receiverUsesChecking ? receiverChecking : receiverSavings) + amount;
+          txn.update(senderRef, senderUpdates);
 
           final fromLabel = fromSavings ? 'Savings' : 'Checking';
-          final toLabel = receiverUsesChecking ? 'Checking' : 'Savings';
-          final debitId = generateId();
+          final toLabel   = receiverUsesChecking ? 'Checking' : 'Savings';
+          final debitId  = generateId();
           final creditId = generateId();
-          transaction.set(
+          txn.set(
             senderRef.collection('transactions').doc(debitId),
             TransactionModel(
-              id: debitId,
-              username: senderUsername,
-              type: 'debit',
+              id: debitId, username: senderUsername, type: 'debit',
               category: 'transfer',
               description: 'Transfer from $fromLabel to $toLabel',
-              amount: amount,
-              date: now,
-              note: note,
+              amount: amount, date: now, note: note,
             ).toJson(),
           );
-          transaction.set(
+          txn.set(
             senderRef.collection('transactions').doc(creditId),
             TransactionModel(
-              id: creditId,
-              username: senderUsername,
-              type: 'credit',
+              id: creditId, username: senderUsername, type: 'credit',
               category: 'transfer',
               description: 'Transfer from $fromLabel to $toLabel',
-              amount: amount,
-              date: now,
-              note: note,
+              amount: amount, date: now, note: note,
             ).toJson(),
           );
           return;
         }
 
-        final receiverSavings = (receiver['savingsBalance'] as num? ?? 0)
-            .toDouble();
-        final receiverChecking = (receiver['checkingBalance'] as num? ?? 0)
-            .toDouble();
-        transaction.update(senderRef, senderUpdates);
-        transaction.update(recipientRef, {
+        // ── Cross-user transfer ────────────────────────────────────────────────
+        final receiverSavings  = (receiver['savingsBalance']  as num? ?? 0).toDouble();
+        final receiverChecking = (receiver['checkingBalance'] as num? ?? 0).toDouble();
+        final recipientUsername = (receiver['username'] as String?) ?? '';
+
+        txn.update(senderRef, senderUpdates);
+        txn.update(recipientRef, {
           receiverUsesChecking ? 'checkingBalance' : 'savingsBalance':
-              (receiverUsesChecking ? receiverChecking : receiverSavings) +
-              amount,
+              (receiverUsesChecking ? receiverChecking : receiverSavings) + amount,
         });
 
-        final senderTransactionId = generateId();
-        final recipientTransactionId = generateId();
-        transaction.set(
-          senderRef.collection('transactions').doc(senderTransactionId),
+        final senderTxId    = generateId();
+        final recipientTxId = generateId();
+        txn.set(
+          senderRef.collection('transactions').doc(senderTxId),
           TransactionModel(
-            id: senderTransactionId,
-            username: senderUsername,
-            type: 'debit',
+            id: senderTxId, username: senderUsername, type: 'debit',
             category: 'transfer',
-            description: 'Transfer to $targetAccountNumber',
-            amount: amount,
-            date: now,
-            note: note,
+            description: 'Transfer to $trimmedTarget',
+            amount: amount, date: now, note: note,
           ).toJson(),
         );
-        transaction.set(
-          recipientRef.collection('transactions').doc(recipientTransactionId),
+        txn.set(
+          recipientRef.collection('transactions').doc(recipientTxId),
           TransactionModel(
-            id: recipientTransactionId,
-            username: recipient.username,
-            type: 'credit',
+            id: recipientTxId, username: recipientUsername, type: 'credit',
             category: 'transfer',
             description: 'Received from $senderName',
-            amount: amount,
-            date: now,
-            note: note,
+            amount: amount, date: now, note: note,
           ).toJson(),
         );
       });
       return null;
-    } on StateError catch (error) {
-      return error.message;
+    } on StateError catch (e) {
+      return e.message;
     } on FirebaseException {
       return 'Transfer failed. Please try again.';
     }

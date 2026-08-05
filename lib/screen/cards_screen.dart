@@ -158,7 +158,9 @@ class _CardsScreenState extends State<CardsScreen> {
     if (user == null) return;
 
     final allTx = await DataService.getTransactions(user.username);
-    // Show recent transactions as card history (in a real app, txs would be linked to a card ID)
+    // Transactions are not yet linked to individual card IDs.
+    // Until card-level tracking is implemented, the 10 most recent
+    // account transactions are shown as a proxy for card history.
     final recent = allTx.take(10).toList();
 
     if (!mounted) return;

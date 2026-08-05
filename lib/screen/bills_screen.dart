@@ -113,7 +113,7 @@ class _BillsScreenState extends State<BillsScreen> {
                 ),
               ),
               TextButton.icon(
-                onPressed: () => _addReminder(ctx),
+                onPressed: () => _addReminder(ctx, setModalState),
                 icon: const Icon(Icons.add),
                 label: const Text('Add reminder'),
               ),
@@ -124,7 +124,10 @@ class _BillsScreenState extends State<BillsScreen> {
     );
   }
 
-  Future<void> _addReminder(BuildContext sheetContext) async {
+  Future<void> _addReminder(
+    BuildContext sheetContext,
+    StateSetter setSheetState,
+  ) async {
     String billName = _billCategories.first['name'] as String;
     final dueCtrl = TextEditingController(text: '1');
     await showDialog<void>(
@@ -171,7 +174,19 @@ class _BillsScreenState extends State<BillsScreen> {
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               await _loadHistory();
-              if (sheetContext.mounted) Navigator.pop(sheetContext);
+              // Refresh the reminders list inside the bottom sheet.
+              if (sheetContext.mounted) {
+                setSheetState(() {
+                  _reminders = List.from(_reminders)
+                    ..removeWhere((r) => r['billName'] == billName)
+                    ..add({
+                      'id': '',
+                      'billName': billName,
+                      'dueDay': day,
+                      'username': user.username,
+                    });
+                });
+              }
             },
             child: const Text('Save'),
           ),
@@ -256,6 +271,8 @@ class _BillsScreenState extends State<BillsScreen> {
     setState(() => _loading = true);
     user.checkingBalance -= amount;
     await DataService.updateUser(user);
+    // Refresh the in-memory user so all screens show the updated balance.
+    AppState.instance.currentUser = user;
 
     await DataService.addTransaction(
       TransactionModel(
