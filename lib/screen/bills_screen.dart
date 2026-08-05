@@ -1,347 +1,476 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/app_state.dart';
+import '../services/data_service.dart';
+import '../models/transaction_model.dart';
+import '../models/notification_item.dart';
 
 class BillsScreen extends StatefulWidget {
   final double currentBalance;
-
-  const BillsScreen({
-    super.key,
-    required this.currentBalance,
-  });
+  const BillsScreen({super.key, required this.currentBalance});
 
   @override
   State<BillsScreen> createState() => _BillsScreenState();
 }
 
 class _BillsScreenState extends State<BillsScreen> {
-  late double balance;
+  final List<Map<String, dynamic>> _billCategories = [
+    {
+      'name': 'Meralco Electric',
+      'icon': Icons.flash_on,
+      'color': Colors.orange,
+    },
+    {'name': 'Maynilad Water', 'icon': Icons.water_drop, 'color': Colors.blue},
+    {'name': 'PLDT Internet', 'icon': Icons.wifi, 'color': Colors.lightBlue},
+    {
+      'name': 'Globe Mobile Load',
+      'icon': Icons.phone_android,
+      'color': Colors.green,
+    },
+    {
+      'name': 'Pru Life Insurance',
+      'icon': Icons.health_and_safety,
+      'color': Colors.red,
+    },
+    {'name': 'Credit Card', 'icon': Icons.credit_card, 'color': Colors.purple},
+    {'name': 'Tuition Fee', 'icon': Icons.school, 'color': Colors.indigo},
+    {'name': 'Cignal TV', 'icon': Icons.tv, 'color': Colors.teal},
+    {
+      'name': 'SSS Contribution',
+      'icon': Icons.account_balance,
+      'color': Colors.brown,
+    },
+    {
+      'name': 'PhilHealth',
+      'icon': Icons.medical_services,
+      'color': Colors.cyan,
+    },
+  ];
 
-  double electricBill = 0;
-  double waterBill = 0;
-  double internetBill = 0;
-  double Iphone = 0;
-
-  List<Map<String, String>> paymentHistory = [];
+  List<TransactionModel> _paymentHistory = [];
+  List<Map<String, dynamic>> _reminders = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    balance = widget.currentBalance;
-    _loadData();
+    _loadHistory();
   }
 
-  // Load saved data from SharedPreferences
-  Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _loadHistory() async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+    final txs = await DataService.getTransactions(user.username);
+    final reminders = await DataService.getBillReminders(user.username);
+    if (!mounted) return;
     setState(() {
-      electricBill = prefs.getDouble('electricBill') ?? electricBill;
-      waterBill = prefs.getDouble('waterBill') ?? waterBill;
-      internetBill = prefs.getDouble('internetBill') ?? internetBill;
-      Iphone = prefs.getDouble('Iphone') ?? Iphone;
-
-      // If balance wasn't modified externally, load saved balance if available
-      balance = prefs.getDouble('bills_balance') ?? widget.currentBalance;
-
-      // Load payment history list
-      final String? historyString = prefs.getString('paymentHistory');
-      if (historyString != null) {
-        final List<dynamic> decodedList = jsonDecode(historyString);
-        paymentHistory = decodedList
-            .map((item) => Map<String, String>.from(item))
-            .toList();
-      }
+      _paymentHistory = txs.where((t) => t.category == 'bills').toList();
+      _reminders = reminders;
+      _loading = false;
     });
   }
 
-  // Save data to SharedPreferences
-  Future<void> _saveData() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('electricBill', electricBill);
-    await prefs.setDouble('waterBill', waterBill);
-    await prefs.setDouble('internetBill', internetBill);
-    await prefs.setDouble('Iphone', Iphone);
-    await prefs.setDouble('bills_balance', balance);
-    await prefs.setString('paymentHistory', jsonEncode(paymentHistory));
-  }
-
-  void editBill(String billName) {
-    final controller = TextEditingController();
-
-    showDialog(
+  Future<void> _showReminders() async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text("Enter $billName Amount"),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: "Enter Amount",
-              border: OutlineInputBorder(),
-              focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Colors.red, width: 2),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Bill Reminders',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text(
-                "Cancel",
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                final amount = double.tryParse(controller.text) ?? 0;
-
-                setState(() {
-                  balance -= amount;
-
-                  if (balance < 0) {
-                    balance = 0;
-                  }
-
-                  switch (billName) {
-                    case "Electric Bill":
-                      electricBill += amount;
-                      break;
-
-                    case "Water Bill":
-                      waterBill += amount;
-                      break;
-
-                    case "Internet Bill":
-                      internetBill += amount;
-                      break;
-
-                    case "Iphone":
-                      Iphone += amount;
-                      break;
-                  }
-
-                  paymentHistory.insert(0, {
-                    "bill": billName,
-                    "amount": "₱${amount.toStringAsFixed(2)}",
-                    "date": DateTime.now().toString().substring(0, 16),
-                  });
-                });
-
-                // Save automatically after every transaction update
-                _saveData();
-
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    backgroundColor: Colors.grey[800],
-                    content: Text(
-                      "$billName paid: ₱${amount.toStringAsFixed(2)}",
-                      style: const TextStyle(color: Colors.white),
-                    ),
+              const SizedBox(height: 12),
+              if (_reminders.isEmpty) const Text('No reminders yet.'),
+              ..._reminders.map(
+                (reminder) => ListTile(
+                  leading: const Icon(
+                    Icons.notifications_active,
+                    color: Color(0xFFD32F2F),
                   ),
-                );
-              },
-              child: const Text("Save"),
-            ),
-          ],
-        );
-      },
+                  title: Text(reminder['billName'] as String),
+                  subtitle: Text(
+                    'Due every month on day ${reminder['dueDay']}',
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () async {
+                      await DataService.removeBillReminder(
+                        reminder['id'] as String,
+                      );
+                      await _loadHistory();
+                      if (!ctx.mounted) return;
+                      setModalState(() {});
+                    },
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _addReminder(ctx),
+                icon: const Icon(Icons.add),
+                label: const Text('Add reminder'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  void saveAndReturn() {
-    _saveData();
-    Navigator.pop(context, balance);
+  Future<void> _addReminder(BuildContext sheetContext) async {
+    String billName = _billCategories.first['name'] as String;
+    final dueCtrl = TextEditingController(text: '1');
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Bill Reminder'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: billName,
+              items: _billCategories
+                  .map(
+                    (bill) => DropdownMenuItem(
+                      value: bill['name'] as String,
+                      child: Text(bill['name'] as String),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) => billName = value ?? billName,
+            ),
+            TextField(
+              controller: dueCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Due day (1–31)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final day = int.tryParse(dueCtrl.text);
+              final user = AppState.instance.currentUser;
+              if (day == null || day < 1 || day > 31 || user == null) return;
+              await DataService.saveBillReminder(
+                username: user.username,
+                billName: billName,
+                dueDay: day,
+              );
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              await _loadHistory();
+              if (sheetContext.mounted) Navigator.pop(sheetContext);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    dueCtrl.dispose();
   }
 
-  Widget buildBillTile(
-      IconData icon,
-      Color color,
-      String title,
-      double totalPaid,
-      ) {
-    return Card(
-      elevation: 2,
-      color: Colors.white,
-      margin: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 6,
-      ),
-      child: ListTile(
-        leading: Icon(
-          icon,
-          color: color,
+  void _payBill(String billName) {
+    final controller = TextEditingController();
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Pay $billName'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Checking Balance: ${DataService.formatCurrency(user.checkingBalance)}',
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                hintText: 'Amount (₱)',
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFD32F2F), width: 2),
+                ),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          "Total Paid: ₱${totalPaid.toStringAsFixed(2)}",
-          style: TextStyle(color: Colors.grey[600]),
-        ),
-        trailing: ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.red,
-            foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
-          onPressed: () => editBill(title),
-          child: const Text("Add"),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD32F2F),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              final amount = double.tryParse(controller.text) ?? 0.0;
+              Navigator.pop(context);
+              if (amount > 0) await _processPayment(billName, amount);
+            },
+            child: const Text('Pay'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processPayment(String billName, double amount) async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+
+    if (user.checkingBalance < amount) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Insufficient Checking Balance. You have ${DataService.formatCurrency(user.checkingBalance)}.',
+          ),
         ),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+    user.checkingBalance -= amount;
+    await DataService.updateUser(user);
+
+    await DataService.addTransaction(
+      TransactionModel(
+        id: DataService.generateId(),
+        username: user.username,
+        type: 'debit',
+        category: 'bills',
+        description: billName,
+        amount: amount,
+        date: DataService.formatDate(DateTime.now()),
+      ),
+    );
+
+    await DataService.addNotification(
+      NotificationItem(
+        id: DataService.generateId(),
+        username: user.username,
+        title: 'Bill Payment Successful',
+        message:
+            '${DataService.formatCurrency(amount)} paid for $billName successfully.',
+        type: 'success',
+        date: DataService.formatDate(DateTime.now()),
+      ),
+    );
+
+    await _loadHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$billName paid: ${DataService.formatCurrency(amount)}'),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = AppState.instance.currentUser;
+
     return Scaffold(
-      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
-        title: const Text("Bills Tracker"),
+        title: const Text('Pay Bills'),
         actions: [
           IconButton(
-            onPressed: saveAndReturn,
-            icon: const Icon(Icons.check),
+            onPressed: _showReminders,
+            icon: const Icon(Icons.notifications_active_outlined),
+            tooltip: 'Bill reminders',
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(20),
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.red[700],
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.red.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: _loading || user == null
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                const Text(
-                  "Available Balance",
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "₱${balance.toStringAsFixed(2)}",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          buildBillTile(
-            Icons.flash_on,
-            Colors.redAccent,
-            "Electric Bill",
-            electricBill,
-          ),
-          buildBillTile(
-            Icons.water_drop,
-            Colors.redAccent,
-            "Water Bill",
-            waterBill,
-          ),
-          buildBillTile(
-            Icons.wifi,
-            Colors.redAccent,
-            "Internet Bill",
-            internetBill,
-          ),
-          buildBillTile(
-            Icons.phone,
-            Colors.redAccent,
-            "Iphone",
-            Iphone, // Fixed bug where Iphone was using internetBill variable
-          ),
-          const Padding(
-            padding: EdgeInsets.all(12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Payment History",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: paymentHistory.isEmpty
-                ? const Center(
-              child: Text(
-                "No payments recorded yet.",
-                style: TextStyle(
-                  color: Colors.grey,
-                ),
-              ),
-            )
-                : ListView.builder(
-              itemCount: paymentHistory.length,
-              itemBuilder: (context, index) {
-                final item = paymentHistory[index];
-
-                return Card(
-                  elevation: 1,
-                  color: Colors.white,
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Colors.grey[200],
-                      child: const Icon(
-                        Icons.receipt_long,
-                        color: Colors.red,
+                Container(
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFD32F2F), Colors.black],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withValues(alpha: 0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    ),
-                    title: Text(
-                      item["bill"]!,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
-                    ),
-                    subtitle: Text(
-                      item["date"]!,
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    trailing: Text(
-                      item["amount"]!,
-                      style: const TextStyle(
-                        color: Colors.red,
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Checking Balance',
+                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                      ),
+                      Text(
+                        DataService.formatCurrency(user.checkingBalance),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Biller Categories',
+                      style: TextStyle(
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+                SizedBox(
+                  height: 120,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    itemCount: _billCategories.length,
+                    itemBuilder: (ctx, i) {
+                      final item = _billCategories[i];
+                      return GestureDetector(
+                        onTap: () => _payBill(item['name']),
+                        child: Container(
+                          width: 100,
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.grey.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                item['icon'],
+                                color: item['color'],
+                                size: 36,
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                item['name'].split(' ').first,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Recent Bill Payments',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _paymentHistory.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'No bills paid yet.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: _paymentHistory.length,
+                          itemBuilder: (context, index) {
+                            final tx = _paymentHistory[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(
+                                  color: Colors.grey.withValues(alpha: 0.1),
+                                ),
+                              ),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.blue.withValues(
+                                    alpha: 0.1,
+                                  ),
+                                  child: const Icon(
+                                    Icons.receipt,
+                                    color: Colors.blue,
+                                  ),
+                                ),
+                                title: Text(
+                                  tx.description,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  tx.date,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                trailing: Text(
+                                  '- ${DataService.formatCurrency(tx.amount)}',
+                                  style: const TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }

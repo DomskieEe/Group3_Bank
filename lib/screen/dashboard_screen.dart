@@ -1,11 +1,11 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'transfer_screen.dart';
-import 'bills_screen.dart';
-import 'cards_screen.dart';
-import 'savings_screen.dart';
+import '../services/app_state.dart';
+import '../services/data_service.dart';
+import '../models/transaction_model.dart';
+import '../models/notification_item.dart';
+import 'transaction_history_screen.dart';
+import 'notifications_screen.dart';
+import 'profile_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -15,462 +15,488 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  double balance = 0.00;
-  List<Map<String, String>> paymentHistory = [];
+  List<TransactionModel> _recentTx = [];
+  int _unreadNotifs = 0;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    loadDashboardData();
+    _loadData();
   }
 
-  Future<void> loadDashboardData() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _loadData() async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
 
+    final txs = await DataService.getTransactions(user.username);
+    final unread = await DataService.getUnreadCount(user.username);
+
+    if (!mounted) return;
     setState(() {
-      balance = prefs.getDouble('balance') ?? 0.00;
-
-      // Load payment history saved from the BillsScreen
-      final String? historyString = prefs.getString('paymentHistory');
-      if (historyString != null) {
-        final List<dynamic> decodedList = jsonDecode(historyString);
-        paymentHistory = decodedList
-            .map((item) => Map<String, String>.from(item))
-            .toList();
-      }
+      _recentTx = txs.take(5).toList();
+      _unreadNotifs = unread;
+      _loading = false;
     });
   }
 
-  Future<void> saveBalance(double value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('balance', value);
-  }
-
-  void updateBalance() {
-    final controller = TextEditingController();
-
-    showDialog(
+  Future<void> _showCashInDialog() async {
+    final amtCtrl = TextEditingController();
+    await showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Add Available Balance"),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: "Enter amount to add",
-              focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFFD32F2F), width: 2),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cash In / Deposit'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the amount to deposit into your Savings account.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amtCtrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Amount (₱)',
+                prefixIcon: Icon(Icons.payments),
+                border: OutlineInputBorder(),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFD32F2F), width: 2),
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text("Cancel", style: TextStyle(color: Colors.black54)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
-              onPressed: () async {
-                double addedAmount =
-                    double.tryParse(controller.text) ?? 0;
-
-                setState(() {
-                  balance += addedAmount;
-                });
-
-                await saveBalance(balance);
-
-                Navigator.pop(context);
-              },
-              child: const Text("Add"),
-            )
           ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD32F2F),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final amt = double.tryParse(amtCtrl.text.trim());
+              if (amt == null || amt <= 0) return;
+              Navigator.pop(ctx, amt);
+            },
+            child: const Text('Deposit'),
+          ),
+        ],
+      ),
+    ).then((amount) async {
+      if (amount == null) return;
+      await _processCashIn(amount as double);
+    });
+  }
+
+  Future<void> _processCashIn(double amount) async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+
+    user.savingsBalance += amount;
+    await DataService.updateUser(user);
+
+    final tx = TransactionModel(
+      id: DataService.generateId(),
+      username: user.username,
+      type: 'credit',
+      category: 'salary',
+      description: 'Cash In / Deposit',
+      amount: amount,
+      date: DataService.formatDate(DateTime.now()),
     );
+    await DataService.addTransaction(tx);
+
+    final notif = NotificationItem(
+      id: DataService.generateId(),
+      username: user.username,
+      title: 'Deposit Successful',
+      message:
+          '${DataService.formatCurrency(amount)} has been deposited to your Savings account.',
+      type: 'success',
+      date: DataService.formatDate(DateTime.now()),
+    );
+    await DataService.addNotification(notif);
+
+    await _loadData();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Successfully deposited ${DataService.formatCurrency(amount)}!',
+        ),
+      ),
+    );
+  }
+
+  String _buildInsight() {
+    if (_recentTx.isEmpty) {
+      return 'Start transacting to get personalized financial insights!';
+    }
+    final debits = _recentTx
+        .where((t) => t.type == 'debit' && t.category != 'transfer')
+        .toList();
+    if (debits.isEmpty) return 'Great job! No expenses recorded recently.';
+
+    final Map<String, double> catTotals = {};
+    for (final tx in debits) {
+      catTotals[tx.category] = (catTotals[tx.category] ?? 0) + tx.amount;
+    }
+    final topCat = catTotals.entries.reduce(
+      (a, b) => a.value > b.value ? a : b,
+    );
+    final totalSpent = debits.fold(0.0, (sum, t) => sum + t.amount);
+    return '📊 You\'ve spent ${DataService.formatCurrency(totalSpent)} recently. '
+        'Your biggest category is ${topCat.key.toUpperCase()} at '
+        '${DataService.formatCurrency(topCat.value)}. '
+        'Consider reviewing your ${topCat.key} budget!';
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = AppState.instance.currentUser;
+    if (user == null || _loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xff0b0b0b),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-
-              // HEADER
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
-                  Text(
-                    "Snap Wallet",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Color(0xFFD32F2F), // Red
-                    child: Icon(
-                      Icons.person,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 25),
-
-              // BALANCE CARD
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
-                  gradient: const LinearGradient(
-                    colors: [
-                      Color(0xFFD32F2F), // Red
-                      Colors.black,      // Black
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        child: RefreshIndicator(
+          onRefresh: _loadData,
+          color: const Color(0xFFD32F2F),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ─── Header ───────────────────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      "Available Balance",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "₱${balance.toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 34,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "Track your personal expenses",
-                      style: TextStyle(
-                        color: Colors.white70,
-                      ),
-                    ),
-                    const SizedBox(height: 15),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                      ),
-                      onPressed: updateBalance,
-                      icon: const Icon(Icons.add),
-                      label: const Text("Add Balance"),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // BUDGET STATUS
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Budget Overview",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Current Balance: ₱${balance.toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        color: Colors.white70,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const LinearProgressIndicator(
-                      value: 0.65,
-                      color: Colors.white,
-                      backgroundColor: Colors.white24,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "65% Budget Remaining",
-                      style: TextStyle(
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 30),
-
-              const Text(
-                "Quick Actions",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  buildAction(
-                    context,
-                    Icons.send,
-                    "Transfer",
-                    const TransferScreen(),
-                  ),
-                  InkWell(
-                    onTap: () async {
-                      final updatedBalance = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => BillsScreen(
-                            currentBalance: balance,
-                          ),
-                        ),
-                      );
-
-                      loadDashboardData();
-
-                      if (updatedBalance != null) {
-                        setState(() {
-                          balance = updatedBalance;
-                        });
-
-                        await saveBalance(updatedBalance);
-                      }
-                    },
-                    child: const Column(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 30,
-                          backgroundColor: Color(0xFFD32F2F), // Red
-                          child: Icon(
-                            Icons.payment,
-                            color: Colors.white,
+                        Text(
+                          'Welcome back,',
+                          style: TextStyle(
+                            color: Theme.of(context).textTheme.bodyMedium?.color
+                                ?.withValues(alpha: 0.7),
                           ),
                         ),
-                        SizedBox(height: 8),
                         Text(
-                          "Bills",
-                          style: TextStyle(
-                            color: Colors.white,
+                          user.name,
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  buildAction(
-                    context,
-                    Icons.credit_card,
-                    "Cards",
-                    const CardsScreen(),
-                  ),
-                  buildAction(
-                    context,
-                    Icons.savings,
-                    "Savings",
-                    const SavingsScreen(),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
-              const Text(
-                "Recent Transactions",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 10),
-
-              // DYNAMIC BILLS PAYMENT HISTORY LIST
-              if (paymentHistory.isNotEmpty) ...[
-                ...paymentHistory.map((item) {
-                  return transactionTile(
-                    Icons.receipt_long,
-                    item["bill"]!,
-                    "- ${item["amount"]!}",
-                    Colors.redAccent,
-                    item["date"]!,
-                  );
-                }),
-              ],
-
-              // STATIC/MOCK TRANSACTIONS
-              transactionTile(
-                Icons.shopping_bag,
-                "SM Department Store",
-                "- ₱1,250",
-                Colors.redAccent,
-                "Today",
-              ),
-              transactionTile(
-                Icons.restaurant,
-                "Food Delivery",
-                "- ₱800",
-                Colors.redAccent,
-                "Today",
-              ),
-              transactionTile(
-                Icons.attach_money,
-                "Salary Deposit",
-                "+ ₱25,000",
-                Colors.greenAccent,
-                "Today",
-              ),
-
-              const SizedBox(height: 30),
-
-              const Text(
-                "AI Insights",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-
-              const SizedBox(height: 15),
-
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white10,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.lightbulb,
-                      color: Colors.white,
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        "Based on your spending habits, reducing food delivery by 20% may help save approximately ₱1,600 this month.",
-                        style: TextStyle(
-                          color: Colors.white,
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ProfileScreen(),
                         ),
+                      ),
+                      child: Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: const Color(0xFFD32F2F),
+                            child: Text(
+                              user.initials,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          if (_unreadNotifs > 0)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: GestureDetector(
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const NotificationsScreen(),
+                                  ),
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.orange,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    '$_unreadNotifs',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 24),
+
+                // ─── Balance Card ───────────────────────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFD32F2F), Colors.black],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFD32F2F).withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Total Balance',
+                        style: TextStyle(color: Colors.white70, fontSize: 16),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        DataService.formatCurrency(user.totalBalance),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 34,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildMiniBalance('Savings', user.savingsBalance),
+                          Container(
+                            width: 1,
+                            height: 30,
+                            color: Colors.white24,
+                          ),
+                          _buildMiniBalance('Checking', user.checkingBalance),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _showCashInDialog,
+                          icon: const Icon(
+                            Icons.add_circle,
+                            color: Colors.white,
+                          ),
+                          label: const Text(
+                            'Cash In',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.white54),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // ─── Recent Transactions ─────────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Recent Transactions',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const TransactionHistoryScreen(),
+                        ),
+                      ),
+                      child: const Text(
+                        'See All',
+                        style: TextStyle(color: Color(0xFFD32F2F)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                if (_recentTx.isEmpty)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text(
+                        'No recent transactions',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else
+                  ..._recentTx.map((tx) => _buildTxTile(tx)),
+
+                const SizedBox(height: 32),
+
+                // ─── AI Insights ─────────────────────────────────────────────
+                const Text(
+                  'AI Insights',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.grey.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.lightbulb,
+                        color: Colors.orange,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          _buildInsight(),
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget buildAction(
-      BuildContext context,
-      IconData icon,
-      String title,
-      Widget screen,
-      ) {
-    return InkWell(
-      onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => screen,
+  Widget _buildMiniBalance(String label, double amount) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          DataService.formatCurrency(amount),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
           ),
-        );
-        loadDashboardData();
-      },
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: const Color(0xFFD32F2F), // Red
-            child: Icon(
-              icon,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-            ),
-          )
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget transactionTile(
-      IconData icon,
-      String title,
-      String amount,
-      Color amountColor,
-      String subtitleDate,
-      ) {
+  Widget _buildTxTile(TransactionModel tx) {
+    final isCredit = tx.type == 'credit';
+    IconData icon;
+    Color iconColor;
+
+    switch (tx.category) {
+      case 'salary':
+        icon = Icons.payments;
+        iconColor = Colors.green;
+        break;
+      case 'shopping':
+        icon = Icons.shopping_bag;
+        iconColor = Colors.purple;
+        break;
+      case 'food':
+        icon = Icons.restaurant;
+        iconColor = Colors.orange;
+        break;
+      case 'bills':
+        icon = Icons.receipt;
+        iconColor = Colors.blue;
+        break;
+      case 'transfer':
+        icon = Icons.swap_horiz;
+        iconColor = Colors.teal;
+        break;
+      default:
+        icon = Icons.attach_money;
+        iconColor = Colors.grey;
+    }
+
     return Card(
-      color: Colors.white10,
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey.withValues(alpha: 0.1)),
+      ),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.white12,
-          child: Icon(
-            icon,
-            color: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: iconColor.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
           ),
+          child: Icon(icon, color: iconColor),
         ),
         title: Text(
-          title,
-          style: const TextStyle(
-            color: Colors.white,
-          ),
+          tx.description,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        subtitle: Text(
-          subtitleDate,
-          style: const TextStyle(
-            color: Colors.white54,
-          ),
-        ),
+        subtitle: Text(tx.date, style: const TextStyle(fontSize: 12)),
         trailing: Text(
-          amount,
+          '${isCredit ? '+' : '-'} ${DataService.formatCurrency(tx.amount)}',
           style: TextStyle(
-            color: amountColor,
+            color: isCredit ? Colors.green : Colors.red,
             fontWeight: FontWeight.bold,
+            fontSize: 14,
           ),
         ),
       ),

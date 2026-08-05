@@ -1,5 +1,5 @@
 import 'package:path/path.dart';
-import 'package:shared_preferences//sqflite.dart';
+import 'package:sqflite/sqflite.dart';
 
 class DatabaseService {
   static Database? _database;
