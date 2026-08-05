@@ -11,6 +11,7 @@ import 'profile_screen.dart';
 import 'qr_scanner_screen.dart';
 import 'settings_screen.dart';
 import 'transfer_screen.dart';
+import 'scheduled_transfers_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -81,6 +82,18 @@ class _MoreScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('More Options')),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(
+              Icons.schedule,
+              color: Color(0xFFD32F2F),
+            ),
+            title: const Text('Scheduled Transfers'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ScheduledTransfersScreen()),
+            ),
+          ),
           ListTile(
             leading: const Icon(
               Icons.account_balance_wallet,

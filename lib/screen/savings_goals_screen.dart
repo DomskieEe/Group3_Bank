@@ -166,10 +166,60 @@ class _SavingsGoalsScreenState extends State<SavingsGoalsScreen> {
             '${DataService.formatCurrency(amount)} added to "${goal.title}"!')));
   }
 
+  Future<void> _configureAutomation() async {
+    if (_goals.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Create a savings goal first.')));
+      return;
+    }
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+    final current = await DataService.getSavingsAutomation(user.username);
+    var enabled = current['enabled'] == true;
+    var goalId = (current['goalId'] as String?) ?? _goals.first.id;
+    var mode = (current['mode'] as String?) ?? 'roundUp';
+    final fixedCtrl = TextEditingController(text: current['amount']?.toString() ?? '10');
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Savings automation'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            SwitchListTile(title: const Text('Enable auto-save'), value: enabled, onChanged: (value) => setDialogState(() => enabled = value)),
+            DropdownButtonFormField<String>(
+              initialValue: goalId,
+              items: _goals.map((goal) => DropdownMenuItem(value: goal.id, child: Text(goal.title))).toList(),
+              onChanged: (value) => setDialogState(() => goalId = value ?? goalId),
+              decoration: const InputDecoration(labelText: 'Savings goal'),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: mode,
+              items: const [DropdownMenuItem(value: 'roundUp', child: Text('Round up each expense')), DropdownMenuItem(value: 'fixed', child: Text('Fixed amount per expense'))],
+              onChanged: (value) => setDialogState(() => mode = value ?? mode),
+              decoration: const InputDecoration(labelText: 'Rule'),
+            ),
+            if (mode == 'fixed') TextField(controller: fixedCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Amount per expense')),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () async {
+              await DataService.setSavingsAutomation(user.username, {'enabled': enabled, 'goalId': goalId, 'mode': mode, 'amount': double.tryParse(fixedCtrl.text) ?? 0});
+              if (ctx.mounted) Navigator.pop(ctx);
+            }, child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+    fixedCtrl.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Savings Goals')),
+      appBar: AppBar(
+        title: const Text('Savings Goals'),
+        actions: [IconButton(onPressed: _configureAutomation, icon: const Icon(Icons.auto_graph), tooltip: 'Savings automation')],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _goals.isEmpty

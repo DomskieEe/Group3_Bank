@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/notification_item.dart';
 import '../models/transaction_model.dart';
@@ -19,11 +20,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<TransactionModel> _recentTx = [];
   int _unreadNotifs = 0;
   bool _loading = true;
+  StreamSubscription? _profileSubscription;
+  StreamSubscription? _transactionSubscription;
+  StreamSubscription? _notificationSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _startLiveUpdates();
+    AppState.instance.sensitiveDataVisible.addListener(_refreshPrivacy);
+  }
+
+  void _refreshPrivacy() {
+    if (mounted) setState(() {});
+  }
+
+  void _startLiveUpdates() {
+    _profileSubscription = DataService.watchCurrentUser().listen((user) {
+      if (!mounted || user == null) return;
+      setState(() => AppState.instance.currentUser = user);
+    });
+    _transactionSubscription = DataService.watchCurrentTransactions().listen((txs) {
+      if (!mounted) return;
+      setState(() {
+        _recentTx = txs.take(5).toList();
+        _loading = false;
+      });
+    });
+    _notificationSubscription =
+        DataService.watchCurrentNotifications().listen((notifications) {
+      if (!mounted) return;
+      setState(() => _unreadNotifs = notifications.where((n) => !n.isRead).length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _profileSubscription?.cancel();
+    _transactionSubscription?.cancel();
+    _notificationSubscription?.cancel();
+    AppState.instance.sensitiveDataVisible.removeListener(_refreshPrivacy);
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -293,7 +331,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Row(
+                        Row(
                           children: [
                             Icon(
                               Icons.account_balance_wallet_outlined,
@@ -306,14 +344,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               style: TextStyle(
                                   color: Colors.white70, fontSize: 16),
                             ),
-                            Spacer(),
-                            Icon(Icons.chevron_right,
-                                color: Colors.white54, size: 20),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: () async {
+                                final next = !AppState.instance.sensitiveDataVisible.value;
+                                AppState.instance.sensitiveDataVisible.value = next;
+                                await DataService.setSensitiveDataVisible(next);
+                              },
+                              icon: Icon(
+                                AppState.instance.sensitiveDataVisible.value
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
                           ],
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          DataService.formatCurrency(user.totalBalance),
+                          AppState.instance.sensitiveDataVisible.value
+                              ? DataService.formatCurrency(user.totalBalance)
+                              : '₱ ••••••',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -500,7 +552,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          DataService.formatCurrency(amount),
+          AppState.instance.sensitiveDataVisible.value
+              ? DataService.formatCurrency(amount)
+              : '••••••',
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../models/app_user.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
 import 'transaction_history_screen.dart';
@@ -12,30 +13,35 @@ class AccountsScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('My QR Code', textAlign: TextAlign.center),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.white,
-              child: QrImageView(
-                data: accountNum,
-                version: QrVersions.auto,
-                size: 200.0,
-                eyeStyle: const QrEyeStyle(color: Colors.black),
-                dataModuleStyle: const QrDataModuleStyle(color: Colors.black),
+        content: SizedBox(
+          width: 232,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                color: Colors.white,
+                child: SizedBox.square(
+                  dimension: 200,
+                  child: QrImageView(
+                    data: accountNum,
+                    version: QrVersions.auto,
+                    eyeStyle: const QrEyeStyle(color: Colors.black),
+                    dataModuleStyle: const QrDataModuleStyle(color: Colors.black),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              accountNum,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                letterSpacing: 2,
+              const SizedBox(height: 16),
+              Text(
+                accountNum,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  letterSpacing: 2,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -49,15 +55,36 @@ class AccountsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = AppState.instance.currentUser;
-    if (user == null) return const Center(child: Text('Not logged in.'));
+    final initialUser = AppState.instance.currentUser;
+    return StreamBuilder<AppUser?>(
+      stream: DataService.watchCurrentUser(),
+      initialData: initialUser,
+      builder: (context, snapshot) {
+        final user = snapshot.data ?? initialUser;
+        if (user == null) return const Center(child: Text('Not logged in.'));
+        AppState.instance.currentUser = user;
 
-    final checkingNum = user.checkingAccountNumber.isNotEmpty
-        ? user.checkingAccountNumber
-        : 'N/A';
+        final checkingNum = user.checkingAccountNumber.isNotEmpty
+            ? user.checkingAccountNumber
+            : 'N/A';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('My Accounts')),
+        return ValueListenableBuilder<bool>(
+          valueListenable: AppState.instance.sensitiveDataVisible,
+          builder: (context, isVisible, _) => Scaffold(
+      appBar: AppBar(
+        title: const Text('My Accounts'),
+        actions: [
+          IconButton(
+            onPressed: () async {
+              final next = !isVisible;
+              AppState.instance.sensitiveDataVisible.value = next;
+              await DataService.setSensitiveDataVisible(next);
+            },
+            icon: Icon(isVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+            tooltip: isVisible ? 'Hide sensitive information' : 'Show sensitive information',
+          ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -75,7 +102,8 @@ class AccountsScreen extends StatelessWidget {
               balance: user.savingsBalance,
               status: user.accountStatus,
               isPrimary: user.accountType == 'savings',
-              onQrTap: () => _showQr(context, user.accountNumber),
+              isSensitiveVisible: isVisible,
+              onQrTap: isVisible ? () => _showQr(context, user.accountNumber) : null,
             ),
             const SizedBox(height: 16),
             _buildAccountCard(
@@ -85,7 +113,8 @@ class AccountsScreen extends StatelessWidget {
               balance: user.checkingBalance,
               status: user.accountStatus,
               isPrimary: user.accountType == 'checking',
-              onQrTap: () => _showQr(context, checkingNum),
+              isSensitiveVisible: isVisible,
+              onQrTap: isVisible ? () => _showQr(context, checkingNum) : null,
             ),
             const SizedBox(height: 40),
             SizedBox(
@@ -114,6 +143,9 @@ class AccountsScreen extends StatelessWidget {
           ],
         ),
       ),
+        ),
+        );
+      },
     );
   }
 
@@ -124,7 +156,8 @@ class AccountsScreen extends StatelessWidget {
     required double balance,
     required String status,
     required bool isPrimary,
-    required VoidCallback onQrTap,
+    required bool isSensitiveVisible,
+    required VoidCallback? onQrTap,
   }) {
     return Card(
       elevation: 4,
@@ -153,25 +186,44 @@ class AccountsScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (isPrimary)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Text(
-                      'Primary',
-                      style: TextStyle(
-                        color: Colors.green,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
+                Row(
+                  children: [
+                    if (isPrimary)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Primary',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                    IconButton(
+                      onPressed: () async {
+                        final next = !AppState.instance.sensitiveDataVisible.value;
+                        AppState.instance.sensitiveDataVisible.value = next;
+                        await DataService.setSensitiveDataVisible(next);
+                      },
+                      icon: Icon(
+                        isSensitiveVisible
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      tooltip: isSensitiveVisible
+                          ? 'Hide account details'
+                          : 'Show account details',
                     ),
-                  ),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -187,21 +239,15 @@ class AccountsScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      DataService.formatCurrency(balance),
+                      isSensitiveVisible
+                          ? DataService.formatCurrency(balance)
+                          : '₱ ••••••',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 24,
                       ),
                     ),
                   ],
-                ),
-                IconButton(
-                  onPressed: onQrTap,
-                  icon: const Icon(
-                    Icons.qr_code,
-                    size: 32,
-                    color: Color(0xFFD32F2F),
-                  ),
                 ),
               ],
             ),
@@ -211,20 +257,32 @@ class AccountsScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
                   children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     const Text(
                       'Account Number',
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      accountNumber,
+                      isSensitiveVisible ? accountNumber : '••••-••••-••••',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.2,
                       ),
+                    ),
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: onQrTap,
+                      icon: const Icon(
+                        Icons.qr_code,
+                        color: Color(0xFFD32F2F),
+                      ),
+                      tooltip: 'Show account QR code',
                     ),
                   ],
                 ),

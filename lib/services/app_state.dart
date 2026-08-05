@@ -7,6 +7,7 @@ class AppState {
 
   AppUser? currentUser;
   final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.dark);
+  final ValueNotifier<bool> sensitiveDataVisible = ValueNotifier(true);
 
   void logout() {
     currentUser = null;

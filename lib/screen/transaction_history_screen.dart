@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
+import '../services/document_service.dart';
 
 class TransactionHistoryScreen extends StatefulWidget {
   const TransactionHistoryScreen({super.key});
@@ -16,11 +18,30 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   bool _loading = true;
   String _filter = 'All';
   String _query = '';
+  DateTime? _fromDate;
+  DateTime? _toDate;
+  double? _minimumAmount;
+  double? _maximumAmount;
+  StreamSubscription? _transactionsSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadHistory();
+    _transactionsSubscription =
+        DataService.watchCurrentTransactions().listen((transactions) {
+      if (!mounted) return;
+      setState(() {
+        _allTx = transactions;
+        _loading = false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _transactionsSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadHistory() async {
@@ -50,7 +71,55 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 query,
               ),
         )
+        .where((t) {
+          final date = DateTime.tryParse(t.date);
+          if (date == null) return _fromDate == null && _toDate == null;
+          if (_fromDate != null && date.isBefore(_fromDate!)) return false;
+          if (_toDate != null && date.isAfter(_toDate!.add(const Duration(days: 1)))) return false;
+          return true;
+        })
+        .where((t) => _minimumAmount == null || t.amount >= _minimumAmount!)
+        .where((t) => _maximumAmount == null || t.amount <= _maximumAmount!)
         .toList();
+  }
+
+  Future<void> _showAdvancedFilters() async {
+    final minCtrl = TextEditingController(text: _minimumAmount?.toString() ?? '');
+    final maxCtrl = TextEditingController(text: _maximumAmount?.toString() ?? '');
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.viewInsetsOf(ctx).bottom + 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Advanced filters', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: () async {
+                final value = await showDatePicker(context: ctx, firstDate: DateTime(2020), lastDate: DateTime.now(), initialDate: _fromDate ?? DateTime.now());
+                if (value != null) setSheetState(() => _fromDate = value);
+              }, child: Text(_fromDate == null ? 'From date' : _fromDate!.toIso8601String().substring(0, 10)))),
+              const SizedBox(width: 8),
+              Expanded(child: OutlinedButton(onPressed: () async {
+                final value = await showDatePicker(context: ctx, firstDate: DateTime(2020), lastDate: DateTime.now(), initialDate: _toDate ?? DateTime.now());
+                if (value != null) setSheetState(() => _toDate = value);
+              }, child: Text(_toDate == null ? 'To date' : _toDate!.toIso8601String().substring(0, 10)))),
+            ]),
+            const SizedBox(height: 8),
+            TextField(controller: minCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Minimum amount')),
+            TextField(controller: maxCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Maximum amount')),
+            const SizedBox(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () { setState(() { _fromDate = null; _toDate = null; _minimumAmount = null; _maximumAmount = null; }); Navigator.pop(ctx); }, child: const Text('Clear')),
+              ElevatedButton(onPressed: () { setState(() { _minimumAmount = double.tryParse(minCtrl.text); _maximumAmount = double.tryParse(maxCtrl.text); }); Navigator.pop(ctx); }, child: const Text('Apply')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    minCtrl.dispose();
+    maxCtrl.dispose();
   }
 
   void _showDetails(TransactionModel tx) {
@@ -85,6 +154,15 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
             _detailRow('Date', tx.date),
             _detailRow('Reference ID', tx.id),
             if (tx.note.isNotEmpty) _detailRow('Note', tx.note),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: () => DocumentService.printReceipt(tx),
+                icon: const Icon(Icons.download),
+                label: const Text('Receipt PDF'),
+              ),
+            ),
           ],
         ),
       ),
@@ -113,7 +191,19 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Transaction History')),
+      appBar: AppBar(
+        title: const Text('Transaction History'),
+        actions: [
+          IconButton(onPressed: _showAdvancedFilters, icon: const Icon(Icons.tune), tooltip: 'Advanced filters'),
+          IconButton(onPressed: () {
+            final user = AppState.instance.currentUser;
+            if (user == null) return;
+            final now = DateTime.now();
+            final monthTransactions = _allTx.where((tx) { final date = DateTime.tryParse(tx.date); return date?.year == now.year && date?.month == now.month; }).toList();
+            DocumentService.printMonthlyStatement(user: user, transactions: monthTransactions, month: now);
+          }, icon: const Icon(Icons.picture_as_pdf), tooltip: 'Monthly statement PDF'),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
