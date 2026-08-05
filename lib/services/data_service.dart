@@ -1068,13 +1068,16 @@ class DataService {
   // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
 
   static Future<List<SavingsGoal>> getSavingsGoals(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => SavingsGoal.fromJson(e))
-        .where((g) => g.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('savings_goals')
+        .orderBy('title')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => SavingsGoal.fromJson(doc.data()))
         .toList();
   }
 
@@ -1082,25 +1085,41 @@ class DataService {
     List<SavingsGoal> goals,
     String username,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    final all = data != null
-        ? (jsonDecode(data) as List)
-              .map((e) => SavingsGoal.fromJson(e))
-              .toList()
-        : <SavingsGoal>[];
-    all.removeWhere((g) => g.username == username);
-    all.addAll(goals);
-    await prefs.setString(
-      _goalsKey,
-      jsonEncode(all.map((g) => g.toJson()).toList()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
+    final batch = _firestore.batch();
+
+    for (final goal in goals) {
+      batch.set(
+        user.collection('savings_goals').doc(goal.id),
+        goal.toJson(),
+      );
+    }
+
+    await batch.commit();
   }
 
   static Future<void> addGoal(SavingsGoal goal) async {
-    final goals = await getSavingsGoals(goal.username);
-    goals.add(goal);
-    await saveGoals(goals, goal.username);
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .set(goal.toJson());
+  }
+
+  static Future<void> updateGoal(SavingsGoal goal) async {
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .update({
+          'currentAmount': goal.currentAmount,
+        });
   }
 
   // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
