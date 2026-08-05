@@ -60,9 +60,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     final email = _emailCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
-    if (email.isNotEmpty &&
-        !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
-      _showSnack('Please enter a valid email address.');
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      _showSnack('A valid email address is required for Firebase login.');
       return;
     }
     if (phone.isNotEmpty && !RegExp(r'^\+?[0-9]{7,15}$').hasMatch(phone)) {

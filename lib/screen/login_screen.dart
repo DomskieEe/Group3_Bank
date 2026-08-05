@@ -25,20 +25,19 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    final username = _userController.text.trim();
+    final email = _userController.text.trim();
     // Passwords are intentionally not trimmed: whitespace is a valid character.
     final password = _passController.text;
-    if (username.isEmpty || password.isEmpty) {
-      _showSnack('Please enter your username and password.');
+    if (email.isEmpty || password.isEmpty) {
+      _showSnack('Please enter your email and password.');
       return;
     }
     setState(() => _loading = true);
-    final user = await DataService.login(username, password);
+    final user = await DataService.login(email, password);
+    if (!mounted) return;
     setState(() => _loading = false);
     if (user != null) {
       AppState.instance.currentUser = user;
-      await DataService.saveSession(user.username);
-      if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/shell');
     } else {
       _showSnack('Invalid username or password.');
@@ -63,21 +62,13 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (authenticated) {
         if (!mounted) return;
-        // Use the last username if available
-        final username = _userController.text.trim();
-        if (username.isNotEmpty) {
-          final users = await DataService.getUsers();
-          try {
-            final user = users.firstWhere((u) => u.username == username);
-            AppState.instance.currentUser = user;
-            await DataService.saveSession(user.username);
-            if (!mounted) return;
-            Navigator.pushReplacementNamed(context, '/shell');
-          } catch (_) {
-            _showSnack('Enter your username first for biometric login.');
-          }
+        final user = await DataService.restoreSession();
+        if (!mounted) return;
+        if (user != null) {
+          AppState.instance.currentUser = user;
+          Navigator.pushReplacementNamed(context, '/shell');
         } else {
-          _showSnack('Enter your username first, then use biometrics.');
+          _showSnack('Sign in with email first before using biometrics.');
         }
       }
     } catch (e) {
@@ -148,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Username
                 _buildField(
                   controller: _userController,
-                  hint: 'Username',
+                  hint: 'Email Address',
                   icon: Icons.person_outline,
                 ),
                 const SizedBox(height: 16),

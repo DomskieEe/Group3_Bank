@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'screen/onboarding_screen.dart';
 import 'screen/login_screen.dart';
 import 'screen/register_screen.dart';
@@ -9,6 +11,9 @@ import 'services/app_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   await DataService.init();
   final isDark = await DataService.getDarkMode();
   AppState.instance.themeMode.value = isDark ? ThemeMode.dark : ThemeMode.light;

@@ -96,7 +96,7 @@ class _TransferScreenState extends State<TransferScreen> {
             ),
             onPressed: () {
               Navigator.pop(ctx);
-              _processTransfer(amt, acct, _noteCtrl.text.trim());
+              _processFirestoreTransfer(amt, acct, _noteCtrl.text.trim());
             },
             child: const Text('Confirm'),
           ),
@@ -105,6 +105,47 @@ class _TransferScreenState extends State<TransferScreen> {
     );
   }
 
+  Future<void> _processFirestoreTransfer(
+    double amount,
+    String targetAcct,
+    String note,
+  ) async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _loading = true);
+    final error = await DataService.transferFunds(
+      senderUsername: user.username,
+      targetAccountNumber: targetAcct,
+      fromSavings: _from == _TransferFrom.savings,
+      amount: amount,
+      note: note,
+    );
+    final refreshedUser = error == null
+        ? await DataService.restoreSession()
+        : null;
+    if (!mounted) return;
+
+    setState(() {
+      _loading = false;
+      if (error == null) {
+        _acctCtrl.clear();
+        _amtCtrl.clear();
+        _noteCtrl.clear();
+      }
+    });
+    if (error != null) {
+      _showSnack(error);
+      return;
+    }
+
+    if (refreshedUser != null) {
+      AppState.instance.currentUser = refreshedUser;
+    }
+    _showSnack('Transfer successful!');
+  }
+
+  // ignore: unused_element
   Future<void> _processTransfer(
     double amount,
     String targetAcct,

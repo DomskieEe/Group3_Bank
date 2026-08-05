@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "627185019923",
+    "project_id": "filinvest-bank-group",
+    "storage_bucket": "filinvest-bank-group.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:627185019923:android:780e1f8b2c46267b41a3e6",
+        "android_client_info": {
+          "package_name": "com.example.filinvest_bank"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJg-wdqkMy9ovc8QTfFZwgt00XrJqPBoI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -12,9 +12,9 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _userCtrl = TextEditingController();
   final _newPassCtrl = TextEditingController();
-  
+
   bool _loading = false;
-  bool _userFound = false;
+  final bool _userFound = false;
   AppUser? _foundUser;
   bool _obscure = true;
 
@@ -31,23 +31,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   Future<void> _checkUser() async {
-    final user = _userCtrl.text.trim();
-    if (user.isEmpty) {
-      _showSnack('Enter your username');
+    final email = _userCtrl.text.trim();
+    if (email.isEmpty) {
+      _showSnack('Enter your email address');
       return;
     }
     setState(() => _loading = true);
-    final users = await DataService.getUsers();
+    final sent = await DataService.sendPasswordReset(email);
+    if (!mounted) return;
     setState(() => _loading = false);
-    
-    try {
-      final found = users.firstWhere((u) => u.username == user);
-      setState(() {
-        _userFound = true;
-        _foundUser = found;
-      });
-    } catch (_) {
-      _showSnack('Username not found.');
+    if (sent) {
+      _showSnack('Password reset link sent. Check your email.');
+      Navigator.pop(context);
+    } else {
+      _showSnack('Unable to send reset link. Check the email address.');
     }
   }
 
@@ -63,7 +60,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     _foundUser!.password = pass;
     await DataService.updateUser(_foundUser!);
     setState(() => _loading = false);
-    
+
     if (!mounted) return;
     _showSnack('Password reset successfully. You can now login.');
     Navigator.pop(context);
@@ -95,22 +92,29 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 20),
-                const Text('Forgot Password?',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold)),
+                const Text(
+                  'Forgot Password?',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Text(
-                  _userFound 
+                  _userFound
                       ? 'Hello ${_foundUser?.name}, enter your new password.'
-                      : 'Enter your username to recover your account.',
+                      : 'Enter your email to receive a password reset link.',
                   style: const TextStyle(color: Colors.white60),
                 ),
                 const SizedBox(height: 32),
-                
+
                 if (!_userFound) ...[
-                  _buildField(controller: _userCtrl, hint: 'Username', icon: Icons.account_circle),
+                  _buildField(
+                    controller: _userCtrl,
+                    hint: 'Email Address',
+                    icon: Icons.email,
+                  ),
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
@@ -119,11 +123,27 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFD32F2F),
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                       ),
                       child: _loading
-                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('NEXT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'NEXT',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
                     ),
                   ),
                 ] else ...[
@@ -133,7 +153,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                     icon: Icons.lock,
                     obscure: _obscure,
                     suffix: IconButton(
-                      icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility, color: Colors.white54),
+                      icon: Icon(
+                        _obscure ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white54,
+                      ),
                       onPressed: () => setState(() => _obscure = !_obscure),
                     ),
                   ),
@@ -145,11 +168,27 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFD32F2F),
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                       ),
                       child: _loading
-                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('RESET PASSWORD', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'RESET PASSWORD',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -179,7 +218,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         suffixIcon: suffix,
         filled: true,
         fillColor: Colors.white10,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),

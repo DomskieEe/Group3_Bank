@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_user.dart';
@@ -15,9 +17,39 @@ class DataService {
   static const String _goalsKey = 'ds_savings_goals';
   static const String _notificationsKey = 'ds_notifications';
   static const String _seededKey = 'ds_is_seeded_v3';
-  static const String _sessionUsernameKey = 'ds_session_username';
   static const String _budgetsKey = 'ds_budgets';
   static const String _billRemindersKey = 'ds_bill_reminders';
+
+  static final _firestore = FirebaseFirestore.instance;
+  static final _auth = FirebaseAuth.instance;
+
+  static CollectionReference<Map<String, dynamic>> get _users =>
+      _firestore.collection('users');
+
+  static AppUser _userFromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data()!;
+    return AppUser.fromJson({...data, 'id': null, 'password': ''});
+  }
+
+  static Map<String, dynamic> _userData(AppUser user) {
+    final data = user.toJson();
+    data
+      ..remove('id')
+      ..remove('password');
+    return data;
+  }
+
+  static Future<DocumentReference<Map<String, dynamic>>?> _userReference(
+    String username,
+  ) async {
+    final query = await _users
+        .where('username', isEqualTo: username)
+        .limit(1)
+        .get();
+    return query.docs.isEmpty ? null : query.docs.single.reference;
+  }
 
   // ─── INIT ───────────────────────────────────────────────────────────────────
 
@@ -356,18 +388,23 @@ class DataService {
   }
 
   static Future<String> generateUniqueAccountNumber() async {
-    final users = await getUsers();
-    final existing = <String>{
-      for (final user in users) user.accountNumber,
-      for (final user in users) user.checkingAccountNumber,
-    };
     final random = Random.secure();
 
     while (true) {
       final digits = List.generate(12, (_) => random.nextInt(10)).join();
       final number =
           '${digits.substring(0, 4)}-${digits.substring(4, 8)}-${digits.substring(8)}';
-      if (!existing.contains(number)) return number;
+      final savingsMatch = await _users
+          .where('accountNumber', isEqualTo: number)
+          .limit(1)
+          .get();
+      final checkingMatch = await _users
+          .where('checkingAccountNumber', isEqualTo: number)
+          .limit(1)
+          .get();
+      if (savingsMatch.docs.isEmpty && checkingMatch.docs.isEmpty) {
+        return number;
+      }
     }
   }
 
@@ -382,91 +419,104 @@ class DataService {
   // ─── USERS ───────────────────────────────────────────────────────────────────
 
   static Future<List<AppUser>> getUsers() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_usersKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list.map((e) => AppUser.fromJson(e)).toList();
+    final snapshot = await _users.get();
+    return snapshot.docs.map(_userFromDocument).toList();
   }
 
-  static Future<void> _saveUsers(List<AppUser> users) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _usersKey,
-      jsonEncode(users.map((u) => u.toJson()).toList()),
-    );
-  }
-
-  static Future<AppUser?> login(String username, String password) async {
-    final users = await getUsers();
+  static Future<AppUser?> login(String email, String password) async {
     try {
-      return users.firstWhere(
-        (u) => u.username == username && u.password == password,
+      final credential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
-    } catch (_) {
+      final profile = await _users.doc(credential.user!.uid).get();
+      if (!profile.exists) {
+        await _auth.signOut();
+        return null;
+      }
+      return _userFromDocument(profile);
+    } on FirebaseAuthException {
       return null;
     }
   }
 
   static Future<bool> usernameExists(String username) async {
-    final users = await getUsers();
-    return users.any((u) => u.username == username);
+    final result = await _users
+        .where('username', isEqualTo: username)
+        .limit(1)
+        .get();
+    return result.docs.isNotEmpty;
   }
 
   static Future<bool> registerUser(AppUser user) async {
-    final users = await getUsers();
-    if (users.any((u) => u.username == user.username)) return false;
-    user.id = users.length + 1;
-    users.add(user);
-    await _saveUsers(users);
-    return true;
+    try {
+      if (await usernameExists(user.username)) return false;
+      final credential = await _auth.createUserWithEmailAndPassword(
+        email: user.email,
+        password: user.password,
+      );
+      await _users.doc(credential.user!.uid).set({
+        ..._userData(user),
+        'authUid': credential.user!.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    } on FirebaseAuthException {
+      return false;
+    } on FirebaseException {
+      return false;
+    }
   }
 
   static Future<void> updateUser(AppUser updated) async {
-    final users = await getUsers();
-    final idx = users.indexWhere((u) => u.username == updated.username);
-    if (idx != -1) {
-      users[idx] = updated;
-      await _saveUsers(users);
-    }
+    final reference = await _userReference(updated.username);
+    if (reference != null) await reference.update(_userData(updated));
   }
 
   static Future<AppUser?> getUserByAccountNumber(String accountNumber) async {
-    final users = await getUsers();
-    try {
-      return users.firstWhere(
-        (u) =>
-            u.accountNumber == accountNumber ||
-            u.checkingAccountNumber == accountNumber,
-      );
-    } catch (_) {
-      return null;
+    final savingsMatch = await _users
+        .where('accountNumber', isEqualTo: accountNumber)
+        .limit(1)
+        .get();
+    if (savingsMatch.docs.isNotEmpty) {
+      return _userFromDocument(savingsMatch.docs.single);
     }
+    final checkingMatch = await _users
+        .where('checkingAccountNumber', isEqualTo: accountNumber)
+        .limit(1)
+        .get();
+    return checkingMatch.docs.isEmpty
+        ? null
+        : _userFromDocument(checkingMatch.docs.single);
   }
 
   static Future<AppUser?> getUserByUsername(String username) async {
-    final users = await getUsers();
-    try {
-      return users.firstWhere((user) => user.username == username);
-    } catch (_) {
-      return null;
-    }
+    final reference = await _userReference(username);
+    if (reference == null) return null;
+    final document = await reference.get();
+    return document.exists ? _userFromDocument(document) : null;
   }
 
-  static Future<void> saveSession(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_sessionUsernameKey, username);
-  }
+  static Future<void> saveSession(String username) async {}
 
   static Future<AppUser?> restoreSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final username = prefs.getString(_sessionUsernameKey);
-    return username == null ? null : getUserByUsername(username);
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) return null;
+    final profile = await _users.doc(firebaseUser.uid).get();
+    return profile.exists ? _userFromDocument(profile) : null;
   }
 
   static Future<void> clearSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_sessionUsernameKey);
+    await _auth.signOut();
+  }
+
+  static Future<bool> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      return true;
+    } on FirebaseAuthException {
+      return false;
+    }
   }
 
   static Future<bool> changePassword({
@@ -474,11 +524,19 @@ class DataService {
     required String currentPassword,
     required String newPassword,
   }) async {
-    final user = await login(username, currentPassword);
-    if (user == null) return false;
-    user.password = newPassword;
-    await updateUser(user);
-    return true;
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser?.email == null) return false;
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: firebaseUser!.email!,
+        password: currentPassword,
+      );
+      await firebaseUser.reauthenticateWithCredential(credential);
+      await firebaseUser.updatePassword(newPassword);
+      return true;
+    } on FirebaseAuthException {
+      return false;
+    }
   }
 
   // ── BUDGETS ──────────────────────────────────────────────────────────────
@@ -563,23 +621,163 @@ class DataService {
 
   // ─── TRANSACTIONS ─────────────────────────────────────────────────────────────
 
+  /// Moves funds and creates both account histories in one Firestore transaction.
+  /// Returns an error message when the transfer cannot be completed.
+  static Future<String?> transferFunds({
+    required String senderUsername,
+    required String targetAccountNumber,
+    required bool fromSavings,
+    required double amount,
+    required String note,
+  }) async {
+    final senderRef = await _userReference(senderUsername);
+    if (senderRef == null) return 'Your account could not be found.';
+
+    final recipient = await getUserByAccountNumber(targetAccountNumber);
+    if (recipient == null) return 'Account number not found.';
+    final recipientRef = await _userReference(recipient.username);
+    if (recipientRef == null) return 'Recipient account could not be found.';
+
+    try {
+      await _firestore.runTransaction((transaction) async {
+        final senderSnapshot = await transaction.get(senderRef);
+        final recipientSnapshot = recipientRef.path == senderRef.path
+            ? senderSnapshot
+            : await transaction.get(recipientRef);
+        final sender = senderSnapshot.data()!;
+        final receiver = recipientSnapshot.data()!;
+        final senderSavings = (sender['savingsBalance'] as num? ?? 0)
+            .toDouble();
+        final senderChecking = (sender['checkingBalance'] as num? ?? 0)
+            .toDouble();
+        final available = fromSavings ? senderSavings : senderChecking;
+        if (available < amount) {
+          throw StateError(
+            'Insufficient ${fromSavings ? 'Savings' : 'Checking'} balance.',
+          );
+        }
+
+        final isOwnAccount = senderRef.path == recipientRef.path;
+        final receiverUsesChecking =
+            targetAccountNumber == receiver['checkingAccountNumber'];
+        if (isOwnAccount && receiverUsesChecking == fromSavings) {
+          throw StateError(
+            'Choose your other account for an own-account transfer.',
+          );
+        }
+
+        final now = formatDate(DateTime.now());
+        final senderName = '${sender['name'] ?? ''} ${sender['surname'] ?? ''}'
+            .trim();
+        final senderUpdates = <String, dynamic>{
+          if (fromSavings) 'savingsBalance': senderSavings - amount,
+          if (!fromSavings) 'checkingBalance': senderChecking - amount,
+        };
+
+        if (isOwnAccount) {
+          senderUpdates[receiverUsesChecking
+                  ? 'checkingBalance'
+                  : 'savingsBalance'] =
+              (receiverUsesChecking ? senderChecking : senderSavings) + amount;
+          transaction.update(senderRef, senderUpdates);
+
+          final fromLabel = fromSavings ? 'Savings' : 'Checking';
+          final toLabel = receiverUsesChecking ? 'Checking' : 'Savings';
+          final debitId = generateId();
+          final creditId = generateId();
+          transaction.set(
+            senderRef.collection('transactions').doc(debitId),
+            TransactionModel(
+              id: debitId,
+              username: senderUsername,
+              type: 'debit',
+              category: 'transfer',
+              description: 'Transfer from $fromLabel to $toLabel',
+              amount: amount,
+              date: now,
+              note: note,
+            ).toJson(),
+          );
+          transaction.set(
+            senderRef.collection('transactions').doc(creditId),
+            TransactionModel(
+              id: creditId,
+              username: senderUsername,
+              type: 'credit',
+              category: 'transfer',
+              description: 'Transfer from $fromLabel to $toLabel',
+              amount: amount,
+              date: now,
+              note: note,
+            ).toJson(),
+          );
+          return;
+        }
+
+        final receiverSavings = (receiver['savingsBalance'] as num? ?? 0)
+            .toDouble();
+        final receiverChecking = (receiver['checkingBalance'] as num? ?? 0)
+            .toDouble();
+        transaction.update(senderRef, senderUpdates);
+        transaction.update(recipientRef, {
+          receiverUsesChecking ? 'checkingBalance' : 'savingsBalance':
+              (receiverUsesChecking ? receiverChecking : receiverSavings) +
+              amount,
+        });
+
+        final senderTransactionId = generateId();
+        final recipientTransactionId = generateId();
+        transaction.set(
+          senderRef.collection('transactions').doc(senderTransactionId),
+          TransactionModel(
+            id: senderTransactionId,
+            username: senderUsername,
+            type: 'debit',
+            category: 'transfer',
+            description: 'Transfer to $targetAccountNumber',
+            amount: amount,
+            date: now,
+            note: note,
+          ).toJson(),
+        );
+        transaction.set(
+          recipientRef.collection('transactions').doc(recipientTransactionId),
+          TransactionModel(
+            id: recipientTransactionId,
+            username: recipient.username,
+            type: 'credit',
+            category: 'transfer',
+            description: 'Received from $senderName',
+            amount: amount,
+            date: now,
+            note: note,
+          ).toJson(),
+        );
+      });
+      return null;
+    } on StateError catch (error) {
+      return error.message;
+    } on FirebaseException {
+      return 'Transfer failed. Please try again.';
+    }
+  }
+
   static Future<List<TransactionModel>> getTransactions(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_transactionsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => TransactionModel.fromJson(e))
-        .where((t) => t.username == username)
+    final reference = await _userReference(username);
+    if (reference == null) return [];
+    final snapshot = await reference
+        .collection('transactions')
+        .orderBy('date', descending: true)
+        .get();
+    return snapshot.docs
+        .map((document) => TransactionModel.fromJson(document.data()))
         .toList();
   }
 
   static Future<void> addTransaction(TransactionModel tx) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_transactionsKey);
-    final list = data != null ? jsonDecode(data) as List : [];
-    list.insert(0, tx.toJson());
-    await prefs.setString(_transactionsKey, jsonEncode(list));
+    final reference = await _userReference(tx.username);
+    if (reference == null) return;
+    await reference.collection('transactions').doc(tx.id).set(tx.toJson());
   }
 
   // ─── CARDS ────────────────────────────────────────────────────────────────────

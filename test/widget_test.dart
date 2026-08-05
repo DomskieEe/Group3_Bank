@@ -17,7 +17,7 @@ void main() {
 
     expect(find.text('Snap Wallet'), findsOneWidget);
     expect(find.text('LOGIN'), findsOneWidget);
-    expect(find.text('Username'), findsOneWidget);
+    expect(find.text('Email Address'), findsOneWidget);
     expect(find.text('Password'), findsOneWidget);
   });
 }
