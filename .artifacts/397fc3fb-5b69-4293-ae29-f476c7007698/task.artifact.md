@@ -1,0 +1,6 @@
+- [x] Create `my_qr_screen.dart` for receiving funds
+- [x] Enhance `qr_scanner_screen.dart` with professional UI and logic
+- [x] Update `transfer_screen.dart` to support QR pre-filling and scan button
+- [x] Modify `main_shell.dart` to add the "Scan" tab to bottom navigation
+- [x] Update `dashboard_screen.dart` with Quick Actions (Scan, My QR)
+- [x] Link Dashboard balance card to `AccountsScreen`
