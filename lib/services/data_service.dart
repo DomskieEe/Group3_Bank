@@ -1029,13 +1029,16 @@ class DataService {
   // ─── CARDS ────────────────────────────────────────────────────────────────────
 
   static Future<List<BankCard>> getCards(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => BankCard.fromJson(e))
-        .where((c) => c.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('cards')
+        .orderBy('cardType')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => BankCard.fromJson(doc.data()))
         .toList();
   }
 
@@ -1048,27 +1051,20 @@ class DataService {
   }
 
   static Future<void> updateCard(BankCard updated) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return;
-    final list = (jsonDecode(data) as List)
-        .map((e) => BankCard.fromJson(e))
-        .toList();
-    final idx = list.indexWhere((c) => c.id == updated.id);
-    if (idx != -1) {
-      list[idx] = updated;
-      await _saveAllCards(list);
-    }
+    final user = await _userReference(updated.username);
+    if (user == null) return;
+
+    await user
+        .collection('cards')
+        .doc(updated.id)
+        .update(updated.toJson());
   }
 
   static Future<void> addCard(BankCard card) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    final list = data != null
-        ? (jsonDecode(data) as List).map((e) => BankCard.fromJson(e)).toList()
-        : <BankCard>[];
-    list.add(card);
-    await _saveAllCards(list);
+    final user = await _userReference(card.username);
+    if (user == null) return;
+
+    await user.collection('cards').doc(card.id).set(card.toJson());
   }
 
   // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
