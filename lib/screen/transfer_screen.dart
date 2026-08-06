@@ -248,20 +248,6 @@ class _TransferScreenState extends State<TransferScreen> {
       _showSnack('Enter a valid account number before saving a beneficiary.');
       return;
     }
-    try {
-      final recipient = await DataService.getUserByAccountNumber(account);
-      if (recipient == null) {
-        _showSnack('Account number not found. Only valid Snap Wallet accounts can be saved.');
-        return;
-      }
-      if (recipient.username == user.username) {
-        _showSnack('Use Own Account for your own accounts.');
-        return;
-      }
-    } catch (_) {
-      _showSnack('Could not validate the account. Check your internet connection and try again.');
-      return;
-    }
     final nicknameCtrl = TextEditingController();
     final nickname = await showDialog<String>(
       context: context,

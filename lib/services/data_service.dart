@@ -1016,13 +1016,9 @@ class DataService {
     final firebaseUser = _auth.currentUser;
     if (firebaseUser == null) throw StateError('No signed-in user');
     final reference = _beneficiariesFor(_users.doc(firebaseUser.uid));
-    final existing = await reference
-        .where('accountNumber', isEqualTo: beneficiary.accountNumber)
-        .limit(1)
-        .get();
-    final document = existing.docs.isEmpty
-        ? reference.doc(beneficiary.id)
-        : existing.docs.single.reference;
+    // Account numbers never contain '/', so they are safe, stable document IDs.
+    // Saving the same account again updates its nickname instead of duplicating it.
+    final document = reference.doc(beneficiary.accountNumber);
     await document.set({...beneficiary.toJson(), 'id': document.id});
   }
 
