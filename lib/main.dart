@@ -17,9 +17,15 @@ void main() async {
   await DataService.init();
   final isDark = await DataService.getDarkMode();
   AppState.instance.themeMode.value = isDark ? ThemeMode.dark : ThemeMode.light;
+  AppState.instance.sensitiveDataVisible.value =
+      await DataService.getSensitiveDataVisible();
   final seenOnboarding = await DataService.getOnboardingSeen();
   final savedUser = await DataService.restoreSession();
   AppState.instance.currentUser = savedUser;
+  if (savedUser != null) {
+    await DataService.processDueScheduledTransfers(savedUser.username);
+    AppState.instance.currentUser = await DataService.restoreSession();
+  }
   runApp(
     BankingApp(
       showOnboarding: !seenOnboarding,

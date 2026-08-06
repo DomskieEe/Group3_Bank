@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
 import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
@@ -30,17 +30,46 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       DataService.getTransactions(user.username),
       DataService.getBudgets(user.username),
     ]);
-    final txs = results[0] as List<TransactionModel>;
-    final budgets = results[1] as Map<String, double>;
     if (!mounted) return;
     setState(() {
-      // Transfers move money between accounts; they are not spending.
-      _txs = txs
-          .where((t) => t.type == 'debit' && t.category != 'transfer')
-          .toList();
-      _budgets = budgets;
+      _txs = results[0] as List<TransactionModel>;
+      _budgets = results[1] as Map<String, double>;
       _loading = false;
     });
+  }
+
+  bool _isInCurrentMonth(TransactionModel tx) {
+    final date = DateTime.tryParse(tx.date);
+    if (date == null) return false;
+    final now = DateTime.now();
+    return date.year == now.year && date.month == now.month;
+  }
+
+  double _totalWhere(bool Function(TransactionModel transaction) test) =>
+      _txs.where((tx) => _isInCurrentMonth(tx) && test(tx)).fold(0.0, (sum, transaction) => sum + transaction.amount);
+
+  Map<String, double> _getExpensesByCategory() {
+    final map = <String, double>{};
+    for (final tx in _txs.where(_isInCurrentMonth)) {
+      if (tx.type != 'debit' || tx.category == 'transfer') continue;
+      map[tx.category] = (map[tx.category] ?? 0) + tx.amount;
+    }
+    return map;
+  }
+
+  double _spendingBetween(DateTime start, DateTime end) => _txs.where((tx) {
+    final date = DateTime.tryParse(tx.date);
+    return date != null && !date.isBefore(start) && date.isBefore(end) && tx.type == 'debit' && tx.category != 'transfer';
+  }).fold(0.0, (sum, tx) => sum + tx.amount);
+
+  int _healthScore({required double spent, required double income}) {
+    final user = AppState.instance.currentUser;
+    var score = 65;
+    if (income > spent) score += 15;
+    if (user != null && user.savingsBalance > user.checkingBalance) score += 10;
+    if (_budgets.values.where((value) => value > 0).isNotEmpty) score += 5;
+    if (income > 0 && spent > income) score -= 20;
+    return score.clamp(0, 100);
   }
 
   Future<void> _editBudget(String category, double current) async {
@@ -54,16 +83,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         content: TextField(
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            hintText: 'Monthly amount (0 clears)',
-            prefixText: '₱ ',
-          ),
+          decoration: const InputDecoration(hintText: 'Monthly amount (0 clears)'),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               final amount = double.tryParse(controller.text.trim());
@@ -82,25 +105,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     controller.dispose();
   }
 
-  Map<String, double> _getExpensesByCategory() {
-    final map = <String, double>{};
-    for (var tx in _txs) {
-      map[tx.category] = (map[tx.category] ?? 0) + tx.amount;
-    }
-    return map;
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final expensesMap = _getExpensesByCategory();
-    final double totalExpense = expensesMap.values.fold(
-      0,
-      (sum, val) => sum + val,
-    );
+    final expenses = _getExpensesByCategory();
+    final spent = expenses.values.fold(0.0, (sum, amount) => sum + amount);
+    final income = _totalWhere((tx) => tx.type == 'credit' && tx.category != 'transfer');
+    final received = _totalWhere((tx) => tx.type == 'credit' && tx.category == 'transfer');
+    final transferred = _totalWhere((tx) => tx.type == 'debit' && tx.category == 'transfer');
+    final now = DateTime.now();
+    final thisWeek = _spendingBetween(now.subtract(const Duration(days: 7)), now.add(const Duration(days: 1)));
+    final lastWeek = _spendingBetween(now.subtract(const Duration(days: 14)), now.subtract(const Duration(days: 7)));
+    final score = _healthScore(spent: spent, income: income);
+    final budgetAlerts = _budgets.entries.where((entry) => entry.value > 0 && (expenses[entry.key] ?? 0) / entry.value >= .8).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Analytics & Budget')),
@@ -109,53 +129,82 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Total Spent',
-              style: TextStyle(color: Colors.grey, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '₱${totalExpense.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 40),
-
-            const Text(
-              'Spending by Category',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            const Text('This Month', style: TextStyle(color: Colors.grey, fontSize: 16)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _summaryCard('Spent', spent, Colors.red),
+                _summaryCard('Income', income, Colors.green),
+                _summaryCard('Received', received, Colors.teal),
+                _summaryCard('Transferred', transferred, Colors.orange),
+              ],
             ),
             const SizedBox(height: 24),
-
-            if (expensesMap.isEmpty)
-              const Center(child: Text('No expenses to analyze yet.'))
+            Card(
+              elevation: 0,
+              color: const Color(0xFFD32F2F).withValues(alpha: .08),
+              child: ListTile(
+                leading: CircleAvatar(backgroundColor: const Color(0xFFD32F2F), child: Text('$score', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                title: const Text('Financial health score', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(score >= 80 ? 'Great balance between spending and saving.' : score >= 60 ? 'Good progress—keep an eye on your budget.' : 'Focus on reducing expenses and building savings.'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('Weekly spending: ${DataService.formatCurrency(thisWeek)}${lastWeek > 0 ? ' (${((thisWeek - lastWeek) / lastWeek * 100).abs().toStringAsFixed(0)}% ${thisWeek > lastWeek ? 'higher' : 'lower'} than last week)' : ''}'),
+            if (budgetAlerts.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text('Budget alerts', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ...budgetAlerts.map((entry) {
+                final used = expenses[entry.key] ?? 0;
+                final percentage = (used / entry.value * 100).round();
+                return ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  title: Text('${entry.key.toUpperCase()} is at $percentage%'),
+                  subtitle: Text('${DataService.formatCurrency(used)} of ${DataService.formatCurrency(entry.value)}'),
+                );
+              }),
+            ],
+            const SizedBox(height: 16),
+            const Text('Personalized tip', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Card(
+              elevation: 0,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(budgetAlerts.isNotEmpty
+                    ? 'Try pausing non-essential ${budgetAlerts.first.key} purchases until your next budget cycle.'
+                    : lastWeek > 0 && thisWeek > lastWeek
+                        ? 'Your spending is higher than last week. Review your recent purchases before the month ends.'
+                        : income > spent
+                            ? 'You are spending less than you earn this month. Consider moving part of the difference to a savings goal.'
+                            : 'Set budgets for your regular categories to receive tailored alerts.'),
+              ),
+            ),
+            const SizedBox(height: 32),
+            const Text('Spending by Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            if (expenses.isEmpty)
+              const Center(child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Text('No spending to analyze this month.'),
+              ))
             else ...[
               SizedBox(
                 height: 250,
-                child: PieChart(
-                  PieChartData(
-                    sectionsSpace: 4,
-                    centerSpaceRadius: 60,
-                    sections: _buildPieSections(expensesMap),
-                  ),
-                ),
+                child: PieChart(PieChartData(
+                  sectionsSpace: 4,
+                  centerSpaceRadius: 60,
+                  sections: _buildPieSections(expenses),
+                )),
               ),
-              const SizedBox(height: 40),
-              const Text(
-                'Category Breakdown',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              ...expensesMap.entries.map(
-                (e) => _buildCategoryRow(e.key, e.value, totalExpense),
-              ),
+              const SizedBox(height: 24),
+              ...expenses.entries.map((entry) => _buildCategoryRow(entry.key, entry.value, spent)),
             ],
             const SizedBox(height: 24),
-            const Text(
-              'Monthly Budgets',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('Monthly Budgets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ...{'bills', 'shopping', 'food', ..._budgets.keys}.map((category) {
-              final spent = expensesMap[category] ?? 0;
+              final categorySpent = expenses[category] ?? 0;
               final budget = _budgets[category] ?? 0;
               return ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -163,16 +212,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 subtitle: budget == 0
                     ? const Text('Tap to set a monthly budget')
                     : LinearProgressIndicator(
-                        value: (spent / budget).clamp(0.0, 1.0),
-                        color: spent > budget
-                            ? Colors.red
-                            : const Color(0xFFD32F2F),
+                        value: (categorySpent / budget).clamp(0.0, 1.0),
+                        color: categorySpent > budget ? Colors.red : const Color(0xFFD32F2F),
                       ),
-                trailing: Text(
-                  budget == 0
-                      ? 'Set budget'
-                      : '${DataService.formatCurrency(spent)} / ${DataService.formatCurrency(budget)}',
-                ),
+                trailing: Text(budget == 0
+                    ? 'Set budget'
+                    : '${DataService.formatCurrency(categorySpent)} / ${DataService.formatCurrency(budget)}'),
                 onTap: () => _editBudget(category, budget),
               );
             }),
@@ -182,97 +227,75 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
+  Widget _summaryCard(String label, double amount, Color color) => SizedBox(
+        width: 155,
+        child: Card(
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 6),
+                Text(DataService.formatCurrency(amount),
+                    style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        ),
+      );
+
   List<PieChartSectionData> _buildPieSections(Map<String, double> data) {
-    return data.entries.map((e) {
-      Color color;
-      switch (e.key) {
-        case 'bills':
-          color = Colors.blue;
-          break;
-        case 'shopping':
-          color = Colors.purple;
-          break;
-        case 'food':
-          color = Colors.orange;
-          break;
-        default:
-          color = Colors.grey;
-      }
+    final total = data.values.fold(0.0, (sum, amount) => sum + amount);
+    return data.entries.map((entry) {
+      final color = _categoryColor(entry.key);
       return PieChartSectionData(
         color: color,
-        value: e.value,
-        title:
-            '${(e.value / data.values.fold(0, (sum, val) => sum + val) * 100).toStringAsFixed(0)}%',
+        value: entry.value,
+        title: '${(entry.value / total * 100).toStringAsFixed(0)}%',
         radius: 50,
-        titleStyle: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
+        titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
       );
     }).toList();
   }
 
-  Widget _buildCategoryRow(String category, double amount, double total) {
-    Color color;
-    IconData icon;
-    switch (category) {
-      case 'bills':
-        color = Colors.blue;
-        icon = Icons.receipt;
-        break;
-      case 'shopping':
-        color = Colors.purple;
-        icon = Icons.shopping_bag;
-        break;
-      case 'food':
-        color = Colors.orange;
-        icon = Icons.restaurant;
-        break;
-      default:
-        color = Colors.grey;
-        icon = Icons.money;
-    }
+  Widget _buildCategoryRow(String category, double amount, double total) => Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: _categoryColor(category).withValues(alpha: 0.1),
+              child: Icon(_categoryIcon(category), color: _categoryColor(category)),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(category.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: amount / total, color: _categoryColor(category)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Text(DataService.formatCurrency(amount), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+      );
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  category.toUpperCase(),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(
-                  value: total > 0 ? amount / total : 0,
-                  backgroundColor: color.withValues(alpha: 0.1),
-                  color: color,
-                  minHeight: 6,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Text(
-            '₱${amount.toStringAsFixed(0)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
+  Color _categoryColor(String category) => switch (category) {
+        'bills' => Colors.blue,
+        'shopping' => Colors.purple,
+        'food' => Colors.orange,
+        _ => Colors.grey,
+      };
+
+  IconData _categoryIcon(String category) => switch (category) {
+        'bills' => Icons.receipt,
+        'shopping' => Icons.shopping_bag,
+        'food' => Icons.restaurant,
+        _ => Icons.attach_money,
+      };
 }

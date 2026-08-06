@@ -9,6 +9,8 @@ import '../models/transaction_model.dart';
 import '../models/bank_card.dart';
 import '../models/savings_goal.dart';
 import '../models/notification_item.dart';
+import '../models/beneficiary.dart';
+import '../models/scheduled_transfer.dart';
 
 class DataService {
   static const String _transactionsKey = 'ds_transactions';
@@ -18,12 +20,19 @@ class DataService {
   static const String _seededKey = 'ds_is_seeded_v3';
   static const String _budgetsKey = 'ds_budgets';
   static const String _billRemindersKey = 'ds_bill_reminders';
+  static const String _beneficiariesKey = 'ds_beneficiaries';
+  static const String _scheduledTransfersKey = 'ds_scheduled_transfers';
+  static const String _savingsAutomationKey = 'ds_savings_automation';
 
   static final _firestore = FirebaseFirestore.instance;
   static final _auth = FirebaseAuth.instance;
 
   static CollectionReference<Map<String, dynamic>> get _users =>
       _firestore.collection('users');
+
+  static CollectionReference<Map<String, dynamic>> _notificationsFor(
+    DocumentReference<Map<String, dynamic>> user,
+  ) => user.collection('notifications');
 
   static AppUser _userFromDocument(
     DocumentSnapshot<Map<String, dynamic>> document,
@@ -340,7 +349,10 @@ class DataService {
   /// Generates a collision-resistant local identifier for demo records.
   /// A real banking app should receive identifiers from its backend.
   static String generateId() {
-    final random = Random.secure().nextInt(1 << 32).toRadixString(16);
+    // JavaScript bit shifts are 32-bit. On Flutter web, `1 << 32` becomes
+    // zero, so Random.nextInt throws RangeError instead of returning an ID.
+    // Keep the upper bound within the portable signed 32-bit range.
+    final random = Random.secure().nextInt(2147483647).toRadixString(16);
     return '${DateTime.now().microsecondsSinceEpoch}_$random';
   }
 
@@ -391,7 +403,10 @@ class DataService {
         await _auth.signOut();
         return null;
       }
-      return _userFromDocument(profile);
+      final user = _userFromDocument(profile);
+      await processDueScheduledTransfers(user.username);
+      final refreshed = await _users.doc(credential.user!.uid).get();
+      return refreshed.exists ? _userFromDocument(refreshed) : null;
     } on FirebaseAuthException {
       return null;
     }
@@ -470,6 +485,15 @@ class DataService {
     return profile.exists ? _userFromDocument(profile) : null;
   }
 
+  /// Emits the signed-in user's profile whenever its Firestore document changes.
+  static Stream<AppUser?> watchCurrentUser() {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) return Stream.value(null);
+    return _users.doc(firebaseUser.uid).snapshots().map(
+          (profile) => profile.exists ? _userFromDocument(profile) : null,
+        );
+  }
+
   static Future<void> clearSession() async {
     await _auth.signOut();
   }
@@ -506,15 +530,15 @@ class DataService {
   // ── BUDGETS ──────────────────────────────────────────────────────────────
 
   static Future<Map<String, double>> getBudgets(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    if (raw == null) return {};
-    final all = jsonDecode(raw) as Map<String, dynamic>;
-    final userBudgets = (all[username] as Map?) ?? {};
-    return userBudgets.map(
-      (category, amount) =>
-          MapEntry(category.toString(), (amount as num).toDouble()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return {};
+
+    final snapshot = await user.collection('budgets').get();
+
+    return {
+      for (final doc in snapshot.docs)
+        doc.id: (doc['amount'] as num).toDouble(),
+    };
   }
 
   static Future<void> setBudget(
@@ -522,21 +546,18 @@ class DataService {
     String category,
     double amount,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    final all = raw == null
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    final userBudgets = Map<String, dynamic>.from(
-      (all[username] as Map?) ?? <String, dynamic>{},
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
     if (amount <= 0) {
-      userBudgets.remove(category);
+      await user.collection('budgets').doc(category).delete();
     } else {
-      userBudgets[category] = amount;
+      await user.collection('budgets').doc(category).set({
+        'category': category,
+        'amount': amount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
-    all[username] = userBudgets;
-    await prefs.setString(_budgetsKey, jsonEncode(all));
   }
 
   // ── BILL REMINDERS ───────────────────────────────────────────────────────
@@ -623,6 +644,8 @@ class DataService {
           : savingsMatch; // reuse — recipient found already
     } on FirebaseException {
       return 'Account number lookup failed. Please try again.';
+    } catch (_) {
+      return 'Account number lookup failed. Please try again.';
     }
 
     final recipientDoc = savingsMatch.docs.isNotEmpty
@@ -635,14 +658,19 @@ class DataService {
     final recipientRef = recipientDoc.reference;
 
     try {
-      await _firestore.runTransaction((txn) async {
+      // Do not throw validation errors from this callback. On web, Firestore
+      // converts a Dart exception raised in a transaction callback into a JS
+      // promise error (shown as `RethrownDartError`) instead of a normal
+      // transfer result.
+      final validationError = await _firestore.runTransaction<String?>(
+        (txn) async {
         // ── ALL reads must come before any writes (web SDK requirement) ────────
         final senderSnap = await txn.get(senderRef);
         final recipientSnap = recipientRef.path == senderRef.path
             ? senderSnap
             : await txn.get(recipientRef);
 
-        if (!senderSnap.exists) throw StateError('Your account could not be found.');
+        if (!senderSnap.exists) return 'Your account could not be found.';
 
         final sender = senderSnap.data()!;
         final receiver = recipientSnap.data()!;
@@ -651,21 +679,17 @@ class DataService {
         final senderChecking = (sender['checkingBalance'] as num? ?? 0).toDouble();
         final available = fromSavings ? senderSavings : senderChecking;
 
-        if (available < amount) {
-          throw StateError(
-            'Insufficient ${fromSavings ? 'Savings' : 'Checking'} balance.',
-          );
-        }
+          if (available < amount) {
+            return 'Insufficient ${fromSavings ? 'Savings' : 'Checking'} balance.';
+          }
 
         final isOwnAccount = recipientRef.path == senderRef.path;
         final receiverUsesChecking =
             trimmedTarget == receiver['checkingAccountNumber'];
 
-        if (isOwnAccount && receiverUsesChecking != fromSavings) {
-          throw StateError(
-            'Select your other account as the destination for an own-account transfer.',
-          );
-        }
+          if (isOwnAccount && receiverUsesChecking != fromSavings) {
+            return 'Select your other account as the destination for an own-account transfer.';
+          }
 
         final now = formatDate(DateTime.now());
         final senderName =
@@ -707,7 +731,23 @@ class DataService {
               amount: amount, date: now, note: note,
             ).toJson(),
           );
-          return;
+          final notificationId = generateId();
+          txn.set(
+            _notificationsFor(senderRef).doc(notificationId),
+            {
+              ...NotificationItem(
+                id: notificationId,
+                username: senderUsername,
+                title: 'Own Account Transfer Complete',
+                message:
+                    '${formatCurrency(amount)} moved from $fromLabel to $toLabel.',
+                type: 'success',
+                date: now,
+              ).toJson(),
+              'createdAt': FieldValue.serverTimestamp(),
+            },
+          );
+          return null;
         }
 
         // ── Cross-user transfer ────────────────────────────────────────────────
@@ -741,11 +781,46 @@ class DataService {
             amount: amount, date: now, note: note,
           ).toJson(),
         );
-      });
+        final senderNotificationId = generateId();
+        final recipientNotificationId = generateId();
+        txn.set(
+          _notificationsFor(senderRef).doc(senderNotificationId),
+          {
+            ...NotificationItem(
+              id: senderNotificationId,
+              username: senderUsername,
+              title: 'Transfer Successful',
+              message:
+                  '${formatCurrency(amount)} sent to $trimmedTarget.',
+              type: 'success',
+              date: now,
+            ).toJson(),
+            'createdAt': FieldValue.serverTimestamp(),
+          },
+        );
+        txn.set(
+          _notificationsFor(recipientRef).doc(recipientNotificationId),
+          {
+            ...NotificationItem(
+              id: recipientNotificationId,
+              username: recipientUsername,
+              title: 'Incoming Transfer',
+              message: 'You received ${formatCurrency(amount)} from $senderName.',
+              type: 'success',
+              date: now,
+            ).toJson(),
+            'createdAt': FieldValue.serverTimestamp(),
+          },
+        );
+          return null;
+        },
+      );
+      if (validationError != null) return validationError;
       return null;
-    } on StateError catch (e) {
-      return e.message;
     } on FirebaseException {
+      return 'Transfer failed. Please try again.';
+    } catch (_) {
+      // Keeps a web SDK error from becoming an unhandled browser promise.
       return 'Transfer failed. Please try again.';
     }
   }
@@ -766,21 +841,205 @@ class DataService {
     final reference = await _userReference(tx.username);
     if (reference == null) return;
     await reference.collection('transactions').doc(tx.id).set(tx.toJson());
+    await _applySavingsAutomation(tx);
+  }
+
+  static Future<Map<String, dynamic>> getSavingsAutomation(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_savingsAutomationKey);
+    if (raw == null) return {'enabled': false};
+    final all = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    return Map<String, dynamic>.from((all[username] as Map?) ?? {'enabled': false});
+  }
+
+  static Future<void> setSavingsAutomation(String username, Map<String, dynamic> setting) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_savingsAutomationKey);
+    final all = raw == null ? <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    all[username] = setting;
+    await prefs.setString(_savingsAutomationKey, jsonEncode(all));
+  }
+
+  static Future<void> _applySavingsAutomation(TransactionModel tx) async {
+    if (tx.type != 'debit' || tx.category == 'transfer') return;
+    final setting = await getSavingsAutomation(tx.username);
+    if (setting['enabled'] != true) return;
+    final goalId = setting['goalId'] as String?;
+    if (goalId == null || goalId.isEmpty) return;
+    final mode = setting['mode'] as String? ?? 'roundUp';
+    final amount = mode == 'fixed'
+        ? ((setting['amount'] as num?) ?? 0).toDouble()
+        : (tx.amount.ceilToDouble() - tx.amount);
+    if (amount <= 0) return;
+    final user = await getUserByUsername(tx.username);
+    if (user == null || user.checkingBalance < amount) return;
+    final goals = await getSavingsGoals(tx.username);
+    final index = goals.indexWhere((goal) => goal.id == goalId);
+    if (index == -1) return;
+    final goal = goals[index];
+    final newGoalAmount = (goal.currentAmount + amount).clamp(0.0, goal.targetAmount).toDouble();
+    final actualAmount = newGoalAmount - goal.currentAmount;
+    if (actualAmount <= 0) return;
+    user.checkingBalance -= actualAmount;
+    user.savingsBalance += actualAmount;
+    goals[index] = SavingsGoal(
+      id: goal.id,
+      username: goal.username,
+      title: goal.title,
+      targetAmount: goal.targetAmount,
+      currentAmount: newGoalAmount,
+      icon: goal.icon,
+    );
+    await updateUser(user);
+    await saveGoals(goals, tx.username);
+    final reference = await _userReference(tx.username);
+    if (reference != null) {
+      final id = generateId();
+      await reference.collection('transactions').doc(id).set(TransactionModel(
+        id: id,
+        username: tx.username,
+        type: 'debit',
+        category: 'transfer',
+        description: 'Auto-save to ${goal.title}',
+        amount: actualAmount,
+        date: formatDate(DateTime.now()),
+        note: 'Savings automation',
+      ).toJson());
+    }
+  }
+
+  // â”€â”€â”€ BENEFICIARIES & SCHEDULED TRANSFERS â”€â”€â”€
+
+  static Future<List<Beneficiary>> getBeneficiaries(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_beneficiariesKey);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List)
+        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.username == username)
+        .toList();
+  }
+
+  static Future<void> saveBeneficiary(Beneficiary beneficiary) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_beneficiariesKey);
+    final all = raw == null ? <Beneficiary>[] : (jsonDecode(raw) as List)
+        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+    all.removeWhere((item) =>
+        item.username == beneficiary.username &&
+        item.accountNumber == beneficiary.accountNumber);
+    all.add(beneficiary);
+    await prefs.setString(_beneficiariesKey, jsonEncode(all.map((item) => item.toJson()).toList()));
+  }
+
+  static Future<void> removeBeneficiary(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_beneficiariesKey);
+    if (raw == null) return;
+    final all = jsonDecode(raw) as List;
+    all.removeWhere((item) => item['id'] == id);
+    await prefs.setString(_beneficiariesKey, jsonEncode(all));
+  }
+
+  static Future<List<ScheduledTransfer>> getScheduledTransfers(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_scheduledTransfersKey);
+    if (raw == null) return [];
+    final items = (jsonDecode(raw) as List)
+        .map((item) => ScheduledTransfer.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.username == username && item.isActive)
+        .toList();
+    items.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    return items;
+  }
+
+  static Future<void> saveScheduledTransfer(ScheduledTransfer transfer) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_scheduledTransfersKey);
+    final all = raw == null ? <ScheduledTransfer>[] : (jsonDecode(raw) as List)
+        .map((item) => ScheduledTransfer.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+    all.removeWhere((item) => item.id == transfer.id);
+    all.add(transfer);
+    await prefs.setString(_scheduledTransfersKey, jsonEncode(all.map((item) => item.toJson()).toList()));
+  }
+
+  static Future<void> cancelScheduledTransfer(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_scheduledTransfersKey);
+    if (raw == null) return;
+    final all = jsonDecode(raw) as List;
+    all.removeWhere((item) => item['id'] == id);
+    await prefs.setString(_scheduledTransfersKey, jsonEncode(all));
+  }
+
+  /// Runs due transfers while the signed-in app is open. Background execution
+  /// requires a server-side scheduler in a production banking application.
+  static Future<void> processDueScheduledTransfers(String username) async {
+    final due = (await getScheduledTransfers(username))
+        .where((item) => !item.dueDate.isAfter(DateTime.now()))
+        .toList();
+    for (final item in due) {
+      final error = await transferFunds(
+        senderUsername: username,
+        targetAccountNumber: item.accountNumber,
+        fromSavings: item.fromSavings,
+        amount: item.amount,
+        note: item.note.isEmpty ? 'Scheduled transfer' : item.note,
+      );
+      if (error != null) continue;
+      if (item.repeatsMonthly) {
+        await saveScheduledTransfer(ScheduledTransfer(
+          id: item.id,
+          username: item.username,
+          accountNumber: item.accountNumber,
+          beneficiaryName: item.beneficiaryName,
+          amount: item.amount,
+          fromSavings: item.fromSavings,
+          note: item.note,
+          scheduledFor: DateTime(item.dueDate.year, item.dueDate.month + 1, item.dueDate.day).toIso8601String(),
+          repeatsMonthly: true,
+        ));
+      } else {
+        await cancelScheduledTransfer(item.id);
+      }
+    }
+  }
+
+  /// Emits the signed-in user's transaction history in real time.
+  static Stream<List<TransactionModel>> watchCurrentTransactions() {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) return Stream.value([]);
+    return _users
+        .doc(firebaseUser.uid)
+        .collection('transactions')
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((document) => TransactionModel.fromJson(document.data()))
+              .toList(),
+        );
   }
 
   // ─── CARDS ────────────────────────────────────────────────────────────────────
 
   static Future<List<BankCard>> getCards(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => BankCard.fromJson(e))
-        .where((c) => c.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('cards')
+        .orderBy('cardType')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => BankCard.fromJson(doc.data()))
         .toList();
   }
 
+  // Unused
   static Future<void> _saveAllCards(List<BankCard> allCards) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -790,39 +1049,35 @@ class DataService {
   }
 
   static Future<void> updateCard(BankCard updated) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return;
-    final list = (jsonDecode(data) as List)
-        .map((e) => BankCard.fromJson(e))
-        .toList();
-    final idx = list.indexWhere((c) => c.id == updated.id);
-    if (idx != -1) {
-      list[idx] = updated;
-      await _saveAllCards(list);
-    }
+    final user = await _userReference(updated.username);
+    if (user == null) return;
+
+    await user
+        .collection('cards')
+        .doc(updated.id)
+        .update(updated.toJson());
   }
 
   static Future<void> addCard(BankCard card) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    final list = data != null
-        ? (jsonDecode(data) as List).map((e) => BankCard.fromJson(e)).toList()
-        : <BankCard>[];
-    list.add(card);
-    await _saveAllCards(list);
+    final user = await _userReference(card.username);
+    if (user == null) return;
+
+    await user.collection('cards').doc(card.id).set(card.toJson());
   }
 
   // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
 
   static Future<List<SavingsGoal>> getSavingsGoals(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => SavingsGoal.fromJson(e))
-        .where((g) => g.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('savings_goals')
+        .orderBy('title')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => SavingsGoal.fromJson(doc.data()))
         .toList();
   }
 
@@ -830,25 +1085,41 @@ class DataService {
     List<SavingsGoal> goals,
     String username,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    final all = data != null
-        ? (jsonDecode(data) as List)
-              .map((e) => SavingsGoal.fromJson(e))
-              .toList()
-        : <SavingsGoal>[];
-    all.removeWhere((g) => g.username == username);
-    all.addAll(goals);
-    await prefs.setString(
-      _goalsKey,
-      jsonEncode(all.map((g) => g.toJson()).toList()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
+    final batch = _firestore.batch();
+
+    for (final goal in goals) {
+      batch.set(
+        user.collection('savings_goals').doc(goal.id),
+        goal.toJson(),
+      );
+    }
+
+    await batch.commit();
   }
 
   static Future<void> addGoal(SavingsGoal goal) async {
-    final goals = await getSavingsGoals(goal.username);
-    goals.add(goal);
-    await saveGoals(goals, goal.username);
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .set(goal.toJson());
+  }
+
+  static Future<void> updateGoal(SavingsGoal goal) async {
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .update({
+          'currentAmount': goal.currentAmount,
+        });
   }
 
   // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
@@ -856,13 +1127,13 @@ class DataService {
   static Future<List<NotificationItem>> getNotifications(
     String username,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_notificationsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => NotificationItem.fromJson(e))
-        .where((n) => n.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+    final snapshot = await _notificationsFor(user)
+        .orderBy('createdAt', descending: true)
+        .get();
+    return snapshot.docs
+        .map((document) => NotificationItem.fromJson(document.data()))
         .toList();
   }
 
@@ -871,28 +1142,41 @@ class DataService {
     return notifs.where((n) => !n.isRead).length;
   }
 
+  /// Emits in-app notifications for the signed-in user in real time.
+  static Stream<List<NotificationItem>> watchCurrentNotifications() {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) return Stream.value([]);
+    return _notificationsFor(_users.doc(firebaseUser.uid))
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((document) => NotificationItem.fromJson(document.data()))
+              .toList(),
+        );
+  }
+
   static Future<void> addNotification(NotificationItem notif) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_notificationsKey);
-    final list = data != null ? jsonDecode(data) as List : [];
-    list.insert(0, notif.toJson());
-    await prefs.setString(_notificationsKey, jsonEncode(list));
+    final user = await _userReference(notif.username);
+    if (user == null) return;
+    await _notificationsFor(user).doc(notif.id).set({
+      ...notif.toJson(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   }
 
   static Future<void> markAllRead(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_notificationsKey);
-    if (data == null) return;
-    final list = (jsonDecode(data) as List)
-        .map((e) => NotificationItem.fromJson(e))
-        .toList();
-    for (final n in list) {
-      if (n.username == username) n.isRead = true;
+    final user = await _userReference(username);
+    if (user == null) return;
+    final unread = await _notificationsFor(user)
+        .where('isRead', isEqualTo: false)
+        .get();
+    if (unread.docs.isEmpty) return;
+    final batch = _firestore.batch();
+    for (final notification in unread.docs) {
+      batch.update(notification.reference, {'isRead': true});
     }
-    await prefs.setString(
-      _notificationsKey,
-      jsonEncode(list.map((n) => n.toJson()).toList()),
-    );
+    await batch.commit();
   }
 
   // ─── SETTINGS ────────────────────────────────────────────────────────────────
@@ -915,6 +1199,16 @@ class DataService {
   static Future<void> setBiometrics(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('setting_biometrics', value);
+  }
+
+  static Future<bool> getSensitiveDataVisible() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('setting_sensitive_data_visible') ?? true;
+  }
+
+  static Future<void> setSensitiveDataVisible(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('setting_sensitive_data_visible', value);
   }
 
   static Future<bool> getOnboardingSeen() async {

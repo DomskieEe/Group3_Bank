@@ -52,17 +52,19 @@ class MyQrScreen extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  QrImageView(
-                    data: accountNumber,
-                    version: QrVersions.auto,
-                    size: 240.0,
-                    eyeStyle: const QrEyeStyle(
-                      eyeShape: QrEyeShape.square,
-                      color: Color(0xFFD32F2F),
-                    ),
-                    dataModuleStyle: const QrDataModuleStyle(
-                      dataModuleShape: QrDataModuleShape.square,
-                      color: Colors.black,
+                  SizedBox.square(
+                    dimension: 240,
+                    child: QrImageView(
+                      data: accountNumber,
+                      version: QrVersions.auto,
+                      eyeStyle: const QrEyeStyle(
+                        eyeShape: QrEyeShape.square,
+                        color: Color(0xFFD32F2F),
+                      ),
+                      dataModuleStyle: const QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.square,
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/notification_item.dart';
 import '../services/app_state.dart';
@@ -13,11 +14,26 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   List<NotificationItem> _notifs = [];
   bool _loading = true;
+  StreamSubscription? _notificationsSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _notificationsSubscription =
+        DataService.watchCurrentNotifications().listen((notifications) {
+      if (!mounted) return;
+      setState(() {
+        _notifs = notifications;
+        _loading = false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationsSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {

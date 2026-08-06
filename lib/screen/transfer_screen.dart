@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import '../models/app_user.dart';
 import '../models/notification_item.dart';
 import '../models/transaction_model.dart';
+import '../models/beneficiary.dart';
+import '../models/scheduled_transfer.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
 import 'qr_scanner_screen.dart';
@@ -49,6 +52,11 @@ class _TransferScreenState extends State<TransferScreen> {
     if (_transferType == 'Own Account') {
       final user = AppState.instance.currentUser;
       if (user == null) return '';
+      if (!AppState.instance.sensitiveDataVisible.value) {
+        return _from == _TransferFrom.savings
+            ? 'Your Checking Account Number'
+            : 'Your Savings Account Number';
+      }
       if (_from == _TransferFrom.savings) {
         return user.checkingAccountNumber.isNotEmpty
             ? 'Checking: ${user.checkingAccountNumber}'
@@ -103,9 +111,138 @@ class _TransferScreenState extends State<TransferScreen> {
             },
             child: const Text('Confirm'),
           ),
+          if (_transferType != 'Own Account')
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _scheduleTransfer(amt, acct, _noteCtrl.text.trim());
+              },
+              icon: const Icon(Icons.schedule),
+              label: const Text('Schedule'),
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _scheduleTransfer(double amount, String accountNumber, String note) async {
+    DateTime selected = DateTime.now().add(const Duration(days: 1));
+    var repeatsMonthly = false;
+    final scheduled = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Schedule transfer'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${DataService.formatCurrency(amount)} to $accountNumber'),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final date = await showDatePicker(
+                    context: ctx,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+                    initialDate: selected,
+                  );
+                  if (date != null) setDialogState(() => selected = date);
+                },
+                icon: const Icon(Icons.calendar_today),
+                label: Text('${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}'),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Repeat monthly'),
+                value: repeatsMonthly,
+                onChanged: (value) => setDialogState(() => repeatsMonthly = value),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save schedule')),
+          ],
+        ),
+      ),
+    );
+    if (scheduled != true) return;
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+    await DataService.saveScheduledTransfer(ScheduledTransfer(
+      id: DataService.generateId(),
+      username: user.username,
+      accountNumber: accountNumber,
+      beneficiaryName: accountNumber,
+      amount: amount,
+      fromSavings: _from == _TransferFrom.savings,
+      note: note,
+      scheduledFor: selected.toIso8601String(),
+      repeatsMonthly: repeatsMonthly,
+    ));
+    if (!mounted) return;
+    _showSnack('Transfer scheduled for ${selected.year}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}.');
+  }
+
+  Future<void> _chooseBeneficiary() async {
+    final user = AppState.instance.currentUser;
+    if (user == null) return;
+    final beneficiaries = await DataService.getBeneficiaries(user.username);
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<Beneficiary>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: beneficiaries.isEmpty
+            ? const SizedBox(height: 140, child: Center(child: Text('No saved beneficiaries yet.')))
+            : ListView(
+                shrinkWrap: true,
+                children: beneficiaries.map((item) => ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  title: Text(item.nickname),
+                  subtitle: Text(item.accountNumber),
+                  onTap: () => Navigator.pop(ctx, item),
+                )).toList(),
+              ),
+      ),
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        _acctCtrl.text = selected.accountNumber;
+        _transferType = 'Other User';
+      });
+    }
+  }
+
+  Future<void> _saveCurrentBeneficiary() async {
+    final account = _acctCtrl.text.trim();
+    final user = AppState.instance.currentUser;
+    if (account.isEmpty || user == null) {
+      _showSnack('Enter an account number first.');
+      return;
+    }
+    final nicknameCtrl = TextEditingController();
+    final nickname = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save beneficiary'),
+        content: TextField(controller: nicknameCtrl, decoration: const InputDecoration(labelText: 'Nickname')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, nicknameCtrl.text.trim()), child: const Text('Save')),
+        ],
+      ),
+    );
+    nicknameCtrl.dispose();
+    if (nickname == null || nickname.isEmpty) return;
+    await DataService.saveBeneficiary(Beneficiary(
+      id: DataService.generateId(),
+      username: user.username,
+      nickname: nickname,
+      accountNumber: account,
+      createdAt: DateTime.now().toIso8601String(),
+    ));
+    _showSnack('$nickname saved to beneficiaries.');
   }
 
   Future<void> _processFirestoreTransfer(
@@ -117,16 +254,28 @@ class _TransferScreenState extends State<TransferScreen> {
     if (user == null) return;
 
     setState(() => _loading = true);
-    final error = await DataService.transferFunds(
-      senderUsername: user.username,
-      targetAccountNumber: targetAcct,
-      fromSavings: _from == _TransferFrom.savings,
-      amount: amount,
-      note: note,
-    );
-    final refreshedUser = error == null
-        ? await DataService.restoreSession()
-        : null;
+    String? error;
+    try {
+      error = await DataService.transferFunds(
+        senderUsername: user.username,
+        targetAccountNumber: targetAcct,
+        fromSavings: _from == _TransferFrom.savings,
+        amount: amount,
+        note: note,
+      );
+    } catch (_) {
+      // A final UI safeguard for platform-specific async errors.
+      error = 'Transfer failed. Please try again.';
+    }
+
+    AppUser? refreshedUser;
+    if (error == null) {
+      try {
+        refreshedUser = await DataService.restoreSession();
+      } catch (_) {
+        error = 'Transfer completed, but the updated balance could not be loaded. Please refresh.';
+      }
+    }
     if (!mounted) return;
 
     setState(() {
@@ -430,6 +579,16 @@ class _TransferScreenState extends State<TransferScreen> {
                 ),
               ),
             ),
+            if (_transferType != 'Own Account')
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  children: [
+                    TextButton.icon(onPressed: _chooseBeneficiary, icon: const Icon(Icons.people_outline), label: const Text('Saved')),
+                    TextButton.icon(onPressed: _saveCurrentBeneficiary, icon: const Icon(Icons.person_add_alt_1), label: const Text('Save')),
+                  ],
+                ),
+              ),
             const SizedBox(height: 24),
 
             // ── Amount ──────────────────────────────────────────────────────
@@ -548,7 +707,9 @@ class _TransferScreenState extends State<TransferScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              DataService.formatCurrency(balance),
+              AppState.instance.sensitiveDataVisible.value
+                  ? DataService.formatCurrency(balance)
+                  : '₱ ••••••',
               style:
               const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
