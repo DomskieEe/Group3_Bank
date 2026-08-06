@@ -38,7 +38,7 @@ class DiscountScreen extends StatelessWidget {
       {'name': 'Jollibee', 'desc': 'Free delivery + discount bundles', 'asset': 'assets/jollibee.jpg'},
       {'name': 'Greenwich', 'desc': 'Slash ₱100 off on large pizzas', 'asset': 'assets/greenwich.png'},
       {'name': 'PC Express', 'desc': 'Discount on PC parts & builds', 'asset': 'assets/pcexpress.png'},
-      {'name': 'Easy PC', 'desc': 'Affordable tech accessories sale', 'asset': 'assets/easypc.jpg'},
+      {'name': 'Easy PC', 'desc': 'Affordable tech accessories sale', 'asset': 'assets/easypc.jpeg'},
     ];
 
     return ListView.builder(
@@ -355,13 +355,15 @@ class _SupportChatModalState extends State<SupportChatModal>
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                     decoration: BoxDecoration(
-                      color: isUser ? const Color(0xFFD32F2F) : Colors.grey[200],
+                      // Bot bubble is black, user bubble remains red
+                      color: isUser ? const Color(0xFFD32F2F) : Colors.black,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
                       message['text']!,
                       style: TextStyle(
-                        color: isUser ? Colors.white : Colors.black87,
+                        // Bot text is white, user text remains black
+                        color: isUser ? Colors.grey: Colors.white,
                       ),
                     ),
                   ),
@@ -387,7 +389,7 @@ class _SupportChatModalState extends State<SupportChatModal>
                         borderSide: BorderSide.none,
                       ),
                       filled: true,
-                      fillColor: Color(0xFFF5F5F5),
+                      fillColor: Color(0xFF000000),
                       contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     ),
                     onSubmitted: _handleSubmitted,
