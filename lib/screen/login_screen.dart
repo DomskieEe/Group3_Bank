@@ -663,6 +663,7 @@ class EnterPinScreen extends StatefulWidget {
 
 class _EnterPinScreenState extends State<EnterPinScreen> {
   final _pinController = TextEditingController();
+  final LocalAuthentication _localAuth = LocalAuthentication();
   bool _obscurePin = true;
   bool _loading = false;
 
@@ -694,6 +695,39 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
         const SnackBar(content: Text('Incorrect PIN. Please try again.')),
       );
     }
+  }
+
+  Future<void> _biometricUnlock() async {
+    final enabled = await DataService.getBiometrics();
+    if (!enabled) {
+      _showBiometricMessage('Enable biometric login in Settings first.');
+      return;
+    }
+
+    try {
+      final supported = await _localAuth.isDeviceSupported();
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final available = await _localAuth.getAvailableBiometrics();
+      if (!supported || !canCheck || available.isEmpty) {
+        _showBiometricMessage('Fingerprint or face unlock is not set up on this device.');
+        return;
+      }
+
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate to unlock Snap Wallet',
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
+      );
+      if (!mounted || !authenticated) return;
+      Navigator.pushReplacementNamed(context, '/shell');
+    } on LocalAuthException catch (error) {
+      _showBiometricMessage('Biometric authentication unavailable: ${error.code.name}.');
+    }
+  }
+
+  void _showBiometricMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -755,6 +789,22 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
                       'Forgot PIN?',
                       style: TextStyle(color: Color(0xFFD32F2F)),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : _biometricUnlock,
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  icon: const Icon(Icons.fingerprint, color: Colors.white70),
+                  label: const Text(
+                    'Unlock with Biometrics',
+                    style: TextStyle(color: Colors.white70),
                   ),
                 ),
                 const Spacer(),

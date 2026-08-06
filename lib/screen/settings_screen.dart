@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
 
@@ -13,6 +14,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDark = true;
   bool _useBiometrics = false;
   bool _loading = true;
+  final LocalAuthentication _localAuth = LocalAuthentication();
 
   @override
   void initState() {
@@ -38,8 +40,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _toggleBiometrics(bool val) async {
-    setState(() => _useBiometrics = val);
-    await DataService.setBiometrics(val);
+    if (!val) {
+      setState(() => _useBiometrics = false);
+      await DataService.setBiometrics(false);
+      return;
+    }
+
+    try {
+      final supported = await _localAuth.isDeviceSupported();
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final available = await _localAuth.getAvailableBiometrics();
+      if (!supported || !canCheck || available.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Set up fingerprint or face unlock in your phone settings first.'),
+          ),
+        );
+        return;
+      }
+
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Confirm biometrics for Snap Wallet',
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
+      );
+      if (!mounted) return;
+      if (!authenticated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Biometric setup was cancelled.')),
+        );
+        return;
+      }
+      setState(() => _useBiometrics = true);
+      await DataService.setBiometrics(true);
+    } on LocalAuthException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to enable biometrics: ${error.code.name}.')),
+      );
+    }
   }
 
   Future<void> _showChangePasswordDialog() async {
