@@ -3,6 +3,97 @@ import 'package:local_auth/local_auth.dart';
 import '../services/data_service.dart';
 import '../services/app_state.dart';
 
+// ─── Custom Logo Painter ────────────────────────────────────────────────────
+
+class SnapWalletLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // 1. Draw solid red rounded background card
+    final bgRect = Rect.fromLTWH(0, 0, w, h);
+    final bgRRect = RRect.fromRectAndRadius(bgRect, Radius.circular(w * 0.22));
+
+    final bgPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFFD32F2F);
+    canvas.drawRRect(bgRRect, bgPaint);
+
+    // 2. Draw crisp white border frame matching reference layout
+    final borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.03
+      ..color = const Color(0xFFFFFFFF);
+    canvas.drawRRect(bgRRect, borderPaint);
+
+    // 3. Draw the Exact Motion Wallet Icon matching the reference image in Pure White
+    final whitePaint = Paint()
+      ..color = const Color(0xFFFFFFFF)
+      ..style = PaintingStyle.fill;
+
+    // Top-middle streak
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.17, h * 0.44, w * 0.22, h * 0.08),
+        Radius.circular(w * 0.04),
+      ),
+      whitePaint,
+    );
+
+    // Bottom long streak
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.17, h * 0.60, w * 0.32, h * 0.08),
+        Radius.circular(w * 0.04),
+      ),
+      whitePaint,
+    );
+
+    // Main Wallet Body
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.35, h * 0.38, w * 0.38, h * 0.35),
+        Radius.circular(w * 0.06),
+      ),
+      whitePaint,
+    );
+
+    // Wallet Flap / Open Card top angle element
+    final flapPath = Path();
+    flapPath.moveTo(w * 0.31, h * 0.38);
+    flapPath.lineTo(w * 0.63, h * 0.38);
+    flapPath.lineTo(w * 0.58, h * 0.24);
+    flapPath.lineTo(w * 0.28, h * 0.31);
+    flapPath.close();
+    canvas.drawPath(flapPath, whitePaint);
+
+    // Wallet Clasp / Button patch on the right edge
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.61, h * 0.50, w * 0.14, h * 0.12),
+        Radius.circular(w * 0.03),
+      ),
+      whitePaint,
+    );
+
+    // Negative space punch-out / dot inside the clasp
+    final redDotPaint = Paint()
+      ..color = const Color(0xFFD32F2F)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(
+      Offset(w * 0.68, h * 0.56),
+      w * 0.025,
+      redDotPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ─── Login Screen ───────────────────────────────────────────────────────────
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -26,7 +117,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     final email = _userController.text.trim();
-    // Passwords are intentionally not trimmed: whitespace is a valid character.
     final password = _passController.text;
     if (email.isEmpty || password.isEmpty) {
       _showSnack('Please enter your email and password.');
@@ -98,27 +188,12 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               children: [
                 const SizedBox(height: 60),
-                // Logo
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(30),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFD32F2F), Colors.black],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFD32F2F).withValues(alpha: 0.4),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.account_balance_wallet,
-                    color: Colors.white,
-                    size: 60,
+                // Custom Logo Painter
+                SizedBox(
+                  width: 110,
+                  height: 110,
+                  child: CustomPaint(
+                    painter: SnapWalletLogoPainter(),
                   ),
                 ),
                 const SizedBox(height: 28),
@@ -185,21 +260,21 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     child: _loading
                         ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
                         : const Text(
-                            'LOGIN',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
+                      'LOGIN',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),

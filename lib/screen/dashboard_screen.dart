@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../models/notification_item.dart';
 import '../models/transaction_model.dart';
 import '../services/app_state.dart';
@@ -7,6 +8,408 @@ import 'accounts_screen.dart';
 import 'notifications_screen.dart';
 import 'profile_screen.dart';
 import 'transaction_history_screen.dart';
+import 'brand_detail_screen.dart';
+import 'youtube_play_screen.dart';
+
+// Global audio player instance helper
+final AudioPlayer _globalAudioPlayer = AudioPlayer();
+
+void _playSwooshSound() async {
+  try {
+    await _globalAudioPlayer.stop();
+    await _globalAudioPlayer.play(AssetSource('swoosh.mp3'));
+  } catch (e) {
+    debugPrint('Error playing sound: $e');
+  }
+}
+
+// ─── Sub-Screens for Tabs ───────────────────────────────────────────────────
+
+class DiscountScreen extends StatelessWidget {
+  const DiscountScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final brands = [
+      {'name': 'Puma', 'desc': 'Up to 50% off on sportswear', 'asset': 'assets/puma.png'},
+      {'name': 'Adidas', 'desc': 'Exclusive voucher codes available', 'asset': 'assets/adidas.jpg'},
+      {'name': 'McDo', 'desc': 'Buy 1 Take 1 on select meals', 'asset': 'assets/mcdo.jpg'},
+      {'name': 'Jollibee', 'desc': 'Free delivery + discount bundles', 'asset': 'assets/jollibee.jpg'},
+      {'name': 'Greenwich', 'desc': 'Slash ₱100 off on large pizzas', 'asset': 'assets/greenwich.png'},
+      {'name': 'PC Express', 'desc': 'Discount on PC parts & builds', 'asset': 'assets/pcexpress.png'},
+      {'name': 'Easy PC', 'desc': 'Affordable tech accessories sale', 'asset': 'assets/easypc.jpg'},
+    ];
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: brands.length,
+      itemBuilder: (context, index) {
+        final brand = brands[index];
+        return Card(
+          elevation: 0,
+          margin: const EdgeInsets.only(bottom: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: Colors.grey.withOpacity(0.2)),
+          ),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: Colors.transparent,
+              backgroundImage: AssetImage(brand['asset'] as String),
+            ),
+            title: Text(brand['name'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text(brand['desc'] as String),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () {
+              _playSwooshSound();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => BrandDetailScreen(
+                    brandName: brand['name'] as String,
+                    description: brand['desc'] as String,
+                    assetPath: brand['asset'] as String,
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class YouTubeTabScreen extends StatelessWidget {
+  const YouTubeTabScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text(
+          '🔥 Trending on YouTube',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        ListTile(
+          leading: const Icon(Icons.play_circle_fill, color: Colors.red, size: 40),
+          title: const Text('Top 10 Flutter Development Tips'),
+          subtitle: const Text('Tech Insights • 1.2M views'),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const YouTubePlayerScreen(
+                  videoTitle: 'Top 10 Flutter Development Tips',
+                  channelName: 'Tech Insights',
+                  views: '1.2M views',
+                ),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.play_circle_fill, color: Colors.red, size: 40),
+          title: const Text('Latest Global News & Updates'),
+          subtitle: const Text('World News 24/7 • 850K views'),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const YouTubePlayerScreen(
+                  videoTitle: 'Latest Global News & Updates',
+                  channelName: 'World News 24/7',
+                  views: '850K views',
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class TikTokTabScreen extends StatelessWidget {
+  const TikTokTabScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Text('⚡ Viral TikTok Videos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        SizedBox(height: 12),
+        ListTile(
+          leading: Icon(Icons.video_collection, color: Colors.black, size: 40),
+          title: Text('#MoneySavingTips - Quick Budget Hack'),
+          subtitle: Text('@financeguru • 3.4M likes'),
+        ),
+      ],
+    );
+  }
+}
+
+class SpotifyTabScreen extends StatelessWidget {
+  const SpotifyTabScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Text('🎶 Trending Musics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        SizedBox(height: 12),
+        ListTile(
+          leading: Icon(Icons.music_note, color: Colors.green, size: 40),
+          title: Text('Global Top 50 - Hits Playlist'),
+          subtitle: Text('Various Artists • 25M streams'),
+        ),
+      ],
+    );
+  }
+}
+
+class TravelTabScreen extends StatelessWidget {
+  const TravelTabScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Text('✈️ Ticket Discounts & Promos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        SizedBox(height: 12),
+        ListTile(
+          leading: Icon(Icons.flight, color: Colors.orange, size: 40),
+          title: Text('Cebu Pacific Seat Sale'),
+          subtitle: Text('Up to 30% off on domestic flights'),
+        ),
+      ],
+    );
+  }
+}
+
+class GamesTabScreen extends StatelessWidget {
+  const GamesTabScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: const [
+        Text('🎮 Entertainment & Gaming', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        SizedBox(height: 12),
+        ListTile(
+          leading: Icon(Icons.sports_esports, color: Colors.purple, size: 40),
+          title: Text('Top Esports Tournaments Live'),
+          subtitle: Text('Stream matches and win rewards'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Chat Support Modal Sheet Widget ────────────────────────────────────────
+
+class SupportChatModal extends StatefulWidget {
+  const SupportChatModal({super.key});
+
+  @override
+  State<SupportChatModal> createState() => _SupportChatModalState();
+}
+
+class _SupportChatModalState extends State<SupportChatModal>
+    with SingleTickerProviderStateMixin {
+  final TextEditingController _messageController = TextEditingController();
+  late AnimationController _animController;
+  late Animation<double> _floatAnimation;
+
+  final List<Map<String, String>> _messages = [
+    {
+      'sender': 'bot',
+      'text': 'Hello! I am your virtual assistant. How can I help you with your app or transactions today?'
+    }
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Setup animation for the floating robot effect
+    _animController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat(reverse: true);
+
+    _floatAnimation = Tween<double>(begin: -4.0, end: 4.0).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  void _handleSubmitted(String text) {
+    if (text.trim().isEmpty) return;
+
+    _messageController.clear();
+    setState(() {
+      _messages.add({'sender': 'user', 'text': text});
+    });
+
+    // Simple simulated bot response logic based on user keywords
+    Future.delayed(const Duration(milliseconds: 600), () {
+      String botReply = 'I can help you with checking your balance, cash-ins, and navigating discounts!';
+
+      final lowerText = text.toLowerCase();
+      if (lowerText.contains('balance') || lowerText.contains('money')) {
+        botReply = 'You can check your total, savings, and checking balances directly from the top summary card on your dashboard.';
+      } else if (lowerText.contains('cash in') || lowerText.contains('deposit')) {
+        botReply = 'To cash in, simply tap the "Cash In" button inside your total balance card.';
+      } else if (lowerText.contains('discount') || lowerText.contains('promo')) {
+        botReply = 'Check out the "Shop & Entertainment" tab section on your dashboard to see brand vouchers and promos!';
+      }
+
+      if (mounted) {
+        setState(() {
+          _messages.add({'sender': 'bot', 'text': botReply});
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          // Chat Header with Animated Floating Robot
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFD32F2F),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Row(
+              children: [
+                // Animated Robot Icon
+                AnimatedBuilder(
+                  animation: _floatAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(0, _floatAnimation.value),
+                      child: child,
+                    );
+                  },
+                  child: const CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.smart_toy, color: Color(0xFFD32F2F)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'App Support Bot',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Text(
+                      'Online • Ready to help',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          // Chat Message List
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final message = _messages[index];
+                final isUser = message['sender'] == 'user';
+                return Align(
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                    decoration: BoxDecoration(
+                      color: isUser ? const Color(0xFFD32F2F) : Colors.grey[200],
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      message['text']!,
+                      style: TextStyle(
+                        color: isUser ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          // Input Area
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: const InputDecoration(
+                      hintText: 'Ask something about the app...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(24)),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Color(0xFFF5F5F5),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    ),
+                    onSubmitted: _handleSubmitted,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  backgroundColor: const Color(0xFFD32F2F),
+                  child: IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white, size: 18),
+                    onPressed: () => _handleSubmitted(_messageController.text),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Dashboard Screen ───────────────────────────────────────────────────────
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -15,7 +418,9 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   List<TransactionModel> _recentTx = [];
   int _unreadNotifs = 0;
   bool _loading = true;
@@ -23,7 +428,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 6, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        _playSwooshSound();
+      }
+    });
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -65,9 +482,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             TextField(
               controller: amtCtrl,
               autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 labelText: 'Amount (₱)',
                 prefixIcon: Icon(Icons.payments),
@@ -126,8 +541,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       id: DataService.generateId(),
       username: user.username,
       title: 'Deposit Successful',
-      message:
-      '${DataService.formatCurrency(amount)} has been deposited to your Savings account.',
+      message: '${DataService.formatCurrency(amount)} has been deposited to your Savings account.',
       type: 'success',
       date: DataService.formatDate(DateTime.now()),
     );
@@ -137,9 +551,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          'Successfully deposited ${DataService.formatCurrency(amount)}!',
-        ),
+        content: Text('Successfully deposited ${DataService.formatCurrency(amount)}!'),
       ),
     );
   }
@@ -165,6 +577,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'Your biggest category is ${topCat.key.toUpperCase()} at '
         '${DataService.formatCurrency(topCat.value)}. '
         'Consider reviewing your ${topCat.key} budget!';
+  }
+
+  void _openChatSupport() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const SupportChatModal(),
+    );
   }
 
   @override
@@ -303,12 +724,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             SizedBox(width: 6),
                             Text(
                               'Total Balance',
-                              style: TextStyle(
-                                  color: Colors.white70, fontSize: 16),
+                              style: TextStyle(color: Colors.white70, fontSize: 16),
                             ),
                             Spacer(),
-                            Icon(Icons.chevron_right,
-                                color: Colors.white54, size: 20),
+                            Icon(Icons.chevron_right, color: Colors.white54, size: 20),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -324,21 +743,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            _buildMiniBalance(
-                              'Savings',
-                              user.savingsBalance,
-                              Icons.savings_outlined,
-                            ),
-                            Container(
-                              width: 1,
-                              height: 30,
-                              color: Colors.white24,
-                            ),
-                            _buildMiniBalance(
-                              'Checking',
-                              user.checkingBalance,
-                              Icons.credit_card_outlined,
-                            ),
+                            _buildMiniBalance('Savings', user.savingsBalance, Icons.savings_outlined),
+                            Container(width: 1, height: 30, color: Colors.white24),
+                            _buildMiniBalance('Checking', user.checkingBalance, Icons.credit_card_outlined),
                           ],
                         ),
                         const SizedBox(height: 20),
@@ -346,14 +753,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           width: double.infinity,
                           child: OutlinedButton.icon(
                             onPressed: _showCashInDialog,
-                            icon: const Icon(
-                              Icons.add_circle,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              'Cash In',
-                              style: TextStyle(color: Colors.white),
-                            ),
+                            icon: const Icon(Icons.add_circle, color: Colors.white),
+                            label: const Text('Cash In', style: TextStyle(color: Colors.white)),
                             style: OutlinedButton.styleFrom(
                               side: const BorderSide(color: Colors.white54),
                               shape: RoundedRectangleBorder(
@@ -368,24 +769,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 32),
 
+                // ─── Shop & Content Tabs Section ────────────────────────────
+                const Text(
+                  'Shop & Entertainment',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.withOpacity(0.2)),
+                  ),
+                  child: Column(
+                    children: [
+                      TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        labelColor: const Color(0xFFD32F2F),
+                        unselectedLabelColor: Colors.grey,
+                        indicatorColor: const Color(0xFFD32F2F),
+                        tabs: const [
+                          Tab(text: 'Discount'),
+                          Tab(text: 'YouTube'),
+                          Tab(text: 'TikTok'),
+                          Tab(text: 'Spotify'),
+                          Tab(text: 'Travel'),
+                          Tab(text: 'Games'),
+                        ],
+                      ),
+                      SizedBox(
+                        height: 250,
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: const [
+                            DiscountScreen(),
+                            YouTubeTabScreen(),
+                            TikTokTabScreen(),
+                            SpotifyTabScreen(),
+                            TravelTabScreen(),
+                            GamesTabScreen(),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+
                 // ─── Recent Transactions Header ──────────────────────────────
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Row(
                       children: [
-                        Icon(
-                          Icons.history,
-                          color: Color(0xFFD32F2F),
-                          size: 22,
-                        ),
+                        Icon(Icons.history, color: Color(0xFFD32F2F), size: 22),
                         SizedBox(width: 8),
                         Text(
                           'Recent Transactions',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -396,15 +838,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           builder: (_) => const TransactionHistoryScreen(),
                         ),
                       ),
-                      icon: const Icon(
-                        Icons.arrow_forward_ios,
-                        size: 12,
-                        color: Color(0xFFD32F2F),
-                      ),
-                      label: const Text(
-                        'See All',
-                        style: TextStyle(color: Color(0xFFD32F2F)),
-                      ),
+                      icon: const Icon(Icons.arrow_forward_ios, size: 12, color: Color(0xFFD32F2F)),
+                      label: const Text('See All', style: TextStyle(color: Color(0xFFD32F2F))),
                     ),
                   ],
                 ),
@@ -414,10 +849,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const Center(
                     child: Padding(
                       padding: EdgeInsets.all(20),
-                      child: Text(
-                        'No recent transactions',
-                        style: TextStyle(color: Colors.grey),
-                      ),
+                      child: Text('No recent transactions', style: TextStyle(color: Colors.grey)),
                     ),
                   )
                 else
@@ -428,16 +860,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 // ─── AI Insights Header ─────────────────────────────────────
                 const Row(
                   children: [
-                    Icon(
-                      Icons.auto_graph,
-                      color: Color(0xFFD32F2F),
-                      size: 22,
-                    ),
+                    Icon(Icons.auto_graph, color: Color(0xFFD32F2F), size: 22),
                     SizedBox(width: 8),
                     Text(
                       'AI Insights',
-                      style:
-                      TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -447,24 +874,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: Colors.grey.withOpacity(0.2),
-                    ),
+                    border: Border.all(color: Colors.grey.withOpacity(0.2)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
-                        Icons.lightbulb,
-                        color: Colors.orange,
-                        size: 28,
-                      ),
+                      const Icon(Icons.lightbulb, color: Colors.orange, size: 28),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Text(
                           _buildInsight(),
                           style: TextStyle(
-                            color:
-                            Theme.of(context).textTheme.bodyMedium?.color,
+                            color: Theme.of(context).textTheme.bodyMedium?.color,
                           ),
                         ),
                       ),
@@ -477,6 +897,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ),
+      // Floating Robot Chat Support Icon (like BIR app style assistant button)
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openChatSupport,
+        backgroundColor: const Color(0xFFD32F2F),
+        icon: const Icon(Icons.smart_toy, color: Colors.white),
+        label: const Text(
+          'Ask Bot',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+      ),
     );
   }
 
@@ -486,16 +916,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         Row(
           children: [
-            Icon(
-              icon,
-              color: Colors.white70,
-              size: 14,
-            ),
+            Icon(icon, color: Colors.white70, size: 14),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ],
         ),
         const SizedBox(height: 4),
@@ -550,8 +973,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         side: BorderSide(color: Colors.grey.withOpacity(0.1)),
       ),
       child: ListTile(
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
@@ -560,10 +982,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           child: Icon(icon, color: iconColor),
         ),
-        title: Text(
-          tx.description,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: Text(tx.description, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(tx.date, style: const TextStyle(fontSize: 12)),
         trailing: Text(
           '${isCredit ? '+' : '-'} ${DataService.formatCurrency(tx.amount)}',
