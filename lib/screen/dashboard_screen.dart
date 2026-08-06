@@ -471,13 +471,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     _profileSubscription?.cancel();
     _transactionSubscription?.cancel();
     _notificationSubscription?.cancel();
-    AppState.instance.sensitiveDataVisible.removeListener(_refreshPrivacy);
-    super.dispose();
-  }
-
-  @override
-  void dispose() {
     _tabController.dispose();
+    AppState.instance.sensitiveDataVisible.removeListener(_refreshPrivacy);
     super.dispose();
   }
 
