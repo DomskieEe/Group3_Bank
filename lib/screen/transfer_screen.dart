@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/app_user.dart';
 import '../models/notification_item.dart';
 import '../models/transaction_model.dart';
@@ -191,6 +192,9 @@ class _TransferScreenState extends State<TransferScreen> {
     List<Beneficiary> beneficiaries;
     try {
       beneficiaries = await DataService.getBeneficiaries(user.username);
+    } on FirebaseException catch (error) {
+      _showSnack('Could not load beneficiaries (${error.code}).');
+      return;
     } catch (_) {
       _showSnack('Could not load beneficiaries. Check your internet connection and try again.');
       return;
@@ -218,6 +222,8 @@ class _TransferScreenState extends State<TransferScreen> {
                               await DataService.removeBeneficiary(item.id);
                               if (ctx.mounted) Navigator.pop(ctx);
                               if (mounted) _showSnack('${item.nickname} removed.');
+                            } on FirebaseException catch (error) {
+                              if (mounted) _showSnack('Could not remove beneficiary (${error.code}).');
                             } catch (_) {
                               if (mounted) _showSnack('Could not remove beneficiary. Please try again.');
                             }
@@ -273,6 +279,8 @@ class _TransferScreenState extends State<TransferScreen> {
         ),
       );
       _showSnack('$nickname saved to beneficiaries.');
+    } on FirebaseException catch (error) {
+      _showSnack('Could not save beneficiary (${error.code}).');
     } catch (_) {
       _showSnack('Could not save beneficiary. Check your internet connection and try again.');
     }
