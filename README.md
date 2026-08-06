@@ -41,6 +41,7 @@ The app is designed to simulate a modern digital-wallet and banking experience. 
 - `lib/services/document_service.dart` generates printable PDF transaction receipts and monthly account statements.
 - `lib/models/` defines the data used by the app, including users, transactions, cards, beneficiaries, notifications, savings goals, and scheduled transfers.
 
+
 ## Technologies Used
 
 - Flutter and Dart for the cross-platform mobile interface
@@ -52,4 +53,4 @@ The app is designed to simulate a modern digital-wallet and banking experience. 
 - `pdf` and `printing` for transaction receipts and statements
 
 
-
+(Screenshots/accounts_screen.jpg)
