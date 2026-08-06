@@ -154,10 +154,7 @@ class _SavingsGoalsScreenState extends State<SavingsGoalsScreen> {
     AppState.instance.currentUser = user;
 
     goal.currentAmount += amount;
-    final allGoals = await DataService.getSavingsGoals(user.username);
-    final idx = allGoals.indexWhere((g) => g.id == goal.id);
-    if (idx != -1) allGoals[idx] = goal;
-    await DataService.saveGoals(allGoals, user.username);
+    await DataService.updateGoal(goal);
 
     await _loadGoals();
     if (!mounted) return;

@@ -530,15 +530,15 @@ class DataService {
   // ── BUDGETS ──────────────────────────────────────────────────────────────
 
   static Future<Map<String, double>> getBudgets(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    if (raw == null) return {};
-    final all = jsonDecode(raw) as Map<String, dynamic>;
-    final userBudgets = (all[username] as Map?) ?? {};
-    return userBudgets.map(
-      (category, amount) =>
-          MapEntry(category.toString(), (amount as num).toDouble()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return {};
+
+    final snapshot = await user.collection('budgets').get();
+
+    return {
+      for (final doc in snapshot.docs)
+        doc.id: (doc['amount'] as num).toDouble(),
+    };
   }
 
   static Future<void> setBudget(
@@ -546,21 +546,18 @@ class DataService {
     String category,
     double amount,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_budgetsKey);
-    final all = raw == null
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    final userBudgets = Map<String, dynamic>.from(
-      (all[username] as Map?) ?? <String, dynamic>{},
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
     if (amount <= 0) {
-      userBudgets.remove(category);
+      await user.collection('budgets').doc(category).delete();
     } else {
-      userBudgets[category] = amount;
+      await user.collection('budgets').doc(category).set({
+        'category': category,
+        'amount': amount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     }
-    all[username] = userBudgets;
-    await prefs.setString(_budgetsKey, jsonEncode(all));
   }
 
   // ── BILL REMINDERS ───────────────────────────────────────────────────────
@@ -1029,16 +1026,20 @@ class DataService {
   // ─── CARDS ────────────────────────────────────────────────────────────────────
 
   static Future<List<BankCard>> getCards(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => BankCard.fromJson(e))
-        .where((c) => c.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('cards')
+        .orderBy('cardType')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => BankCard.fromJson(doc.data()))
         .toList();
   }
 
+  // Unused
   static Future<void> _saveAllCards(List<BankCard> allCards) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -1048,39 +1049,35 @@ class DataService {
   }
 
   static Future<void> updateCard(BankCard updated) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    if (data == null) return;
-    final list = (jsonDecode(data) as List)
-        .map((e) => BankCard.fromJson(e))
-        .toList();
-    final idx = list.indexWhere((c) => c.id == updated.id);
-    if (idx != -1) {
-      list[idx] = updated;
-      await _saveAllCards(list);
-    }
+    final user = await _userReference(updated.username);
+    if (user == null) return;
+
+    await user
+        .collection('cards')
+        .doc(updated.id)
+        .update(updated.toJson());
   }
 
   static Future<void> addCard(BankCard card) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_cardsKey);
-    final list = data != null
-        ? (jsonDecode(data) as List).map((e) => BankCard.fromJson(e)).toList()
-        : <BankCard>[];
-    list.add(card);
-    await _saveAllCards(list);
+    final user = await _userReference(card.username);
+    if (user == null) return;
+
+    await user.collection('cards').doc(card.id).set(card.toJson());
   }
 
   // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
 
   static Future<List<SavingsGoal>> getSavingsGoals(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => SavingsGoal.fromJson(e))
-        .where((g) => g.username == username)
+    final user = await _userReference(username);
+    if (user == null) return [];
+
+    final snapshot = await user
+        .collection('savings_goals')
+        .orderBy('title')
+        .get();
+
+    return snapshot.docs
+        .map((doc) => SavingsGoal.fromJson(doc.data()))
         .toList();
   }
 
@@ -1088,25 +1085,41 @@ class DataService {
     List<SavingsGoal> goals,
     String username,
   ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    final all = data != null
-        ? (jsonDecode(data) as List)
-              .map((e) => SavingsGoal.fromJson(e))
-              .toList()
-        : <SavingsGoal>[];
-    all.removeWhere((g) => g.username == username);
-    all.addAll(goals);
-    await prefs.setString(
-      _goalsKey,
-      jsonEncode(all.map((g) => g.toJson()).toList()),
-    );
+    final user = await _userReference(username);
+    if (user == null) return;
+
+    final batch = _firestore.batch();
+
+    for (final goal in goals) {
+      batch.set(
+        user.collection('savings_goals').doc(goal.id),
+        goal.toJson(),
+      );
+    }
+
+    await batch.commit();
   }
 
   static Future<void> addGoal(SavingsGoal goal) async {
-    final goals = await getSavingsGoals(goal.username);
-    goals.add(goal);
-    await saveGoals(goals, goal.username);
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .set(goal.toJson());
+  }
+
+  static Future<void> updateGoal(SavingsGoal goal) async {
+    final user = await _userReference(goal.username);
+    if (user == null) return;
+
+    await user
+        .collection('savings_goals')
+        .doc(goal.id)
+        .update({
+          'currentAmount': goal.currentAmount,
+        });
   }
 
   // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
