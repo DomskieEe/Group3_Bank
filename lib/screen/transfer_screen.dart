@@ -188,7 +188,13 @@ class _TransferScreenState extends State<TransferScreen> {
   Future<void> _chooseBeneficiary() async {
     final user = AppState.instance.currentUser;
     if (user == null) return;
-    final beneficiaries = await DataService.getBeneficiaries(user.username);
+    List<Beneficiary> beneficiaries;
+    try {
+      beneficiaries = await DataService.getBeneficiaries(user.username);
+    } catch (_) {
+      _showSnack('Could not load beneficiaries. Check your internet connection and try again.');
+      return;
+    }
     if (!mounted) return;
     final selected = await showModalBottomSheet<Beneficiary>(
       context: context,
@@ -197,12 +203,29 @@ class _TransferScreenState extends State<TransferScreen> {
             ? const SizedBox(height: 140, child: Center(child: Text('No saved beneficiaries yet.')))
             : ListView(
                 shrinkWrap: true,
-                children: beneficiaries.map((item) => ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.person)),
-                  title: Text(item.nickname),
-                  subtitle: Text(item.accountNumber),
-                  onTap: () => Navigator.pop(ctx, item),
-                )).toList(),
+                children: beneficiaries
+                    .map(
+                      (item) => ListTile(
+                        leading: const CircleAvatar(child: Icon(Icons.person)),
+                        title: Text(item.nickname),
+                        subtitle: Text(item.accountNumber),
+                        onTap: () => Navigator.pop(ctx, item),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Remove beneficiary',
+                          onPressed: () async {
+                            try {
+                              await DataService.removeBeneficiary(item.id);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (mounted) _showSnack('${item.nickname} removed.');
+                            } catch (_) {
+                              if (mounted) _showSnack('Could not remove beneficiary. Please try again.');
+                            }
+                          },
+                        ),
+                      ),
+                    )
+                    .toList(),
               ),
       ),
     );
@@ -221,6 +244,24 @@ class _TransferScreenState extends State<TransferScreen> {
       _showSnack('Enter an account number first.');
       return;
     }
+    if (!RegExp(r'^\d{4}-\d{4}-\d{4}$').hasMatch(account)) {
+      _showSnack('Enter a valid account number before saving a beneficiary.');
+      return;
+    }
+    try {
+      final recipient = await DataService.getUserByAccountNumber(account);
+      if (recipient == null) {
+        _showSnack('Account number not found. Only valid Snap Wallet accounts can be saved.');
+        return;
+      }
+      if (recipient.username == user.username) {
+        _showSnack('Use Own Account for your own accounts.');
+        return;
+      }
+    } catch (_) {
+      _showSnack('Could not validate the account. Check your internet connection and try again.');
+      return;
+    }
     final nicknameCtrl = TextEditingController();
     final nickname = await showDialog<String>(
       context: context,
@@ -235,14 +276,20 @@ class _TransferScreenState extends State<TransferScreen> {
     );
     nicknameCtrl.dispose();
     if (nickname == null || nickname.isEmpty) return;
-    await DataService.saveBeneficiary(Beneficiary(
-      id: DataService.generateId(),
-      username: user.username,
-      nickname: nickname,
-      accountNumber: account,
-      createdAt: DateTime.now().toIso8601String(),
-    ));
-    _showSnack('$nickname saved to beneficiaries.');
+    try {
+      await DataService.saveBeneficiary(
+        Beneficiary(
+          id: DataService.generateId(),
+          username: user.username,
+          nickname: nickname,
+          accountNumber: account,
+          createdAt: DateTime.now().toIso8601String(),
+        ),
+      );
+      _showSnack('$nickname saved to beneficiaries.');
+    } catch (_) {
+      _showSnack('Could not save beneficiary. Check your internet connection and try again.');
+    }
   }
 
   Future<void> _processFirestoreTransfer(

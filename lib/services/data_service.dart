@@ -44,6 +44,10 @@ class DataService {
     DocumentReference<Map<String, dynamic>> user,
   ) => user.collection('notifications');
 
+  static CollectionReference<Map<String, dynamic>> _beneficiariesFor(
+    DocumentReference<Map<String, dynamic>> user,
+  ) => user.collection('beneficiaries');
+
   static AppUser _userFromDocument(
     DocumentSnapshot<Map<String, dynamic>> document,
   ) {
@@ -963,35 +967,69 @@ class DataService {
   // â”€â”€â”€ BENEFICIARIES & SCHEDULED TRANSFERS â”€â”€â”€
 
   static Future<List<Beneficiary>> getBeneficiaries(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_beneficiariesKey);
-    if (raw == null) return [];
-    return (jsonDecode(raw) as List)
-        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) return [];
+    final reference = _beneficiariesFor(_users.doc(firebaseUser.uid));
+    await _migrateLocalBeneficiaries(reference, username);
+    final snapshot = await reference.get();
+    final beneficiaries = snapshot.docs
+        .map((document) => Beneficiary.fromJson(document.data()))
         .where((item) => item.username == username)
         .toList();
+    beneficiaries.sort(
+      (a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()),
+    );
+    return beneficiaries;
   }
 
-  static Future<void> saveBeneficiary(Beneficiary beneficiary) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_beneficiariesKey);
-    final all = raw == null ? <Beneficiary>[] : (jsonDecode(raw) as List)
-        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
-        .toList();
-    all.removeWhere((item) =>
-        item.username == beneficiary.username &&
-        item.accountNumber == beneficiary.accountNumber);
-    all.add(beneficiary);
-    await prefs.setString(_beneficiariesKey, jsonEncode(all.map((item) => item.toJson()).toList()));
-  }
-
-  static Future<void> removeBeneficiary(String id) async {
+  static Future<void> _migrateLocalBeneficiaries(
+    CollectionReference<Map<String, dynamic>> reference,
+    String username,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_beneficiariesKey);
     if (raw == null) return;
-    final all = jsonDecode(raw) as List;
-    all.removeWhere((item) => item['id'] == id);
-    await prefs.setString(_beneficiariesKey, jsonEncode(all));
+    final local = (jsonDecode(raw) as List)
+        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.username == username)
+        .toList();
+    if (local.isEmpty) return;
+
+    final batch = _firestore.batch();
+    for (final beneficiary in local) {
+      batch.set(reference.doc(beneficiary.id), beneficiary.toJson());
+    }
+    await batch.commit();
+    final remaining = (jsonDecode(raw) as List)
+        .map((item) => Beneficiary.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.username != username)
+        .map((item) => item.toJson())
+        .toList();
+    if (remaining.isEmpty) {
+      await prefs.remove(_beneficiariesKey);
+    } else {
+      await prefs.setString(_beneficiariesKey, jsonEncode(remaining));
+    }
+  }
+
+  static Future<void> saveBeneficiary(Beneficiary beneficiary) async {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) throw StateError('No signed-in user');
+    final reference = _beneficiariesFor(_users.doc(firebaseUser.uid));
+    final existing = await reference
+        .where('accountNumber', isEqualTo: beneficiary.accountNumber)
+        .limit(1)
+        .get();
+    final document = existing.docs.isEmpty
+        ? reference.doc(beneficiary.id)
+        : existing.docs.single.reference;
+    await document.set({...beneficiary.toJson(), 'id': document.id});
+  }
+
+  static Future<void> removeBeneficiary(String id) async {
+    final firebaseUser = _auth.currentUser;
+    if (firebaseUser == null) throw StateError('No signed-in user');
+    await _beneficiariesFor(_users.doc(firebaseUser.uid)).doc(id).delete();
   }
 
   static Future<List<ScheduledTransfer>> getScheduledTransfers(String username) async {
