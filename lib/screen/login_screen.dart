@@ -1,41 +1,136 @@
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
+import 'dart:math' as math;
 import '../services/data_service.dart';
 import '../services/app_state.dart';
 
-// ─── Custom Logo Painter ────────────────────────────────────────────────────
+// ─── Animated 3D Custom Logo Widget ─────────────────────────────────────────
 
-class SnapWalletLogoPainter extends CustomPainter {
+class AnimatedSnapWalletLogo extends StatefulWidget {
+  final double size;
+  const AnimatedSnapWalletLogo({super.key, this.size = 110});
+
+  @override
+  State<AnimatedSnapWalletLogo> createState() => _AnimatedSnapWalletLogoState();
+}
+
+class _AnimatedSnapWalletLogoState extends State<AnimatedSnapWalletLogo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 10),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        // Continuous smooth oscillation for 3D rotation simulation
+        final double animValue = _controller.value;
+
+        // Simulating 3D perspective tilt using Matrix4 rotation & scaling
+        final double angleX = math.sin(animValue * 2 * math.pi) * 0.15;
+        final double angleY = math.cos(animValue * 2 * math.pi) * 0.20;
+        final double scale = 1.0 + (math.sin(animValue * math.pi) * 0.05);
+
+        final Matrix4 transform = Matrix4.identity()
+          ..setEntry(3, 2, 0.001) // perspective
+          ..rotateX(angleX)
+          ..rotateY(angleY)
+          ..scale(scale);
+
+        return Center(
+          child: Transform(
+            transform: transform,
+            alignment: Alignment.center,
+            child: Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(widget.size * 0.22),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFD32F2F).withOpacity(0.4),
+                    blurRadius: 18 + (animValue * 10),
+                    spreadRadius: 2,
+                    offset: Offset(math.sin(animValue * math.pi) * 6, 10),
+                  ),
+                ],
+              ),
+              child: CustomPaint(
+                painter: SnapWallet3DLogoPainter(progress: animValue),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class SnapWallet3DLogoPainter extends CustomPainter {
+  final double progress;
+  SnapWallet3DLogoPainter({required this.progress});
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
 
-    // 1. Draw solid red rounded background card
+    // 1. Draw 3D Multi-Layer Shadow / Extrusion effect behind the base card
+    final depthOffset = 4.0 + (math.sin(progress * math.pi) * 2.0);
+    final shadowRect = Rect.fromLTWH(depthOffset, depthOffset + 4, w, h);
+    final shadowRRect = RRect.fromRectAndRadius(shadowRect, Radius.circular(w * 0.22));
+    final shadowPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFF5A0000).withOpacity(0.6);
+    canvas.drawRRect(shadowRRect, shadowPaint);
+
+    // 2. Draw solid red rounded background card with gradient shading for 3D depth
     final bgRect = Rect.fromLTWH(0, 0, w, h);
     final bgRRect = RRect.fromRectAndRadius(bgRect, Radius.circular(w * 0.22));
 
+    final Gradient bgGradient = LinearGradient(
+      colors: const [Color(0xFFFF5252), Color(0xFFB71C1C)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
     final bgPaint = Paint()
       ..style = PaintingStyle.fill
-      ..color = const Color(0xFFD32F2F);
+      ..shader = bgGradient.createShader(bgRect);
     canvas.drawRRect(bgRRect, bgPaint);
 
-    // 2. Draw crisp white border frame matching reference layout
+    // 3. Draw crisp glowing white border frame
     final borderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = w * 0.03
-      ..color = const Color(0xFFFFFFFF);
+      ..color = const Color(0xFFFFFFFF).withOpacity(0.9);
     canvas.drawRRect(bgRRect, borderPaint);
 
-    // 3. Draw the Exact Motion Wallet Icon matching the reference image in Pure White
+    // 4. Draw Inner 3D Motion Wallet Elements in Pure White
     final whitePaint = Paint()
       ..color = const Color(0xFFFFFFFF)
       ..style = PaintingStyle.fill;
 
-    // Top-middle streak
+    // Top-middle streak with slight dynamic floating translation
+    final floatOffset = math.sin(progress * math.pi * 2) * 1.5;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(w * 0.17, h * 0.44, w * 0.22, h * 0.08),
+        Rect.fromLTWH(w * 0.17, (h * 0.44) + floatOffset, w * 0.22, h * 0.08),
         Radius.circular(w * 0.04),
       ),
       whitePaint,
@@ -89,7 +184,9 @@ class SnapWalletLogoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant SnapWallet3DLogoPainter oldDelegate) {
+    return oldDelegate.progress != progress;
+  }
 }
 
 // ─── Login Screen ───────────────────────────────────────────────────────────
@@ -118,17 +215,30 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     final email = _userController.text.trim();
     final password = _passController.text;
+
     if (email.isEmpty || password.isEmpty) {
       _showSnack('Please enter your email and password.');
       return;
     }
+
     setState(() => _loading = true);
     final user = await DataService.login(email, password);
     if (!mounted) return;
     setState(() => _loading = false);
+
     if (user != null) {
       AppState.instance.currentUser = user;
-      Navigator.pushReplacementNamed(context, '/shell');
+
+      // Check if user has a PIN already created.
+      bool hasPin = false; // Mock check variable, hook up your actual DataService method
+
+      if (!hasPin) {
+        final pinCreated = await Navigator.pushNamed(context, '/createPin');
+        if (pinCreated != true) return;
+      }
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/enterPin');
     } else {
       _showSnack('Invalid username or password.');
     }
@@ -187,16 +297,10 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.all(28),
             child: Column(
               children: [
-                const SizedBox(height: 60),
-                // Custom Logo Painter
-                SizedBox(
-                  width: 110,
-                  height: 110,
-                  child: CustomPaint(
-                    painter: SnapWalletLogoPainter(),
-                  ),
-                ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 30),
+                // Animated 3D Custom Logo Widget Integration
+                const AnimatedSnapWalletLogo(size: 120),
+                const SizedBox(height: 24),
                 const Text(
                   'Snap Wallet',
                   style: TextStyle(
@@ -210,8 +314,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   'Your way to financial freedom',
                   style: TextStyle(color: Colors.white60, fontSize: 14),
                 ),
-                const SizedBox(height: 48),
-                // Username
+                const SizedBox(height: 36),
+                // Email Address
                 _buildField(
                   controller: _userController,
                   hint: 'Email Address',
@@ -232,8 +336,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
                 ),
-                const SizedBox(height: 12),
-                // Forgot password
+                const SizedBox(height: 4),
+                // Forgot Password link
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
@@ -297,7 +401,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: Colors.white70),
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
+                // Navigation to Create PIN or Forgot PIN screens
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pushNamed(context, '/createPin'),
+                      child: const Text(
+                        'Create PIN',
+                        style: TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const Text('•', style: TextStyle(color: Colors.white54)),
+                    TextButton(
+                      onPressed: () => Navigator.pushNamed(context, '/forgotPin'),
+                      child: const Text(
+                        'Forgot PIN?',
+                        style: TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
                 // Register link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -352,6 +478,405 @@ class _LoginScreenState extends State<LoginScreen> {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Create PIN Screen ──────────────────────────────────────────────────────
+
+class CreatePinScreen extends StatefulWidget {
+  const CreatePinScreen({super.key});
+
+  @override
+  State<CreatePinScreen> createState() => _CreatePinScreenState();
+}
+
+class _CreatePinScreenState extends State<CreatePinScreen> {
+  final _newPinController = TextEditingController();
+  final _confirmPinController = TextEditingController();
+  bool _obscurePin = true;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _newPinController.dispose();
+    _confirmPinController.dispose();
+    super.dispose();
+  }
+
+  void _savePin() {
+    final pin = _newPinController.text.trim();
+    final confirmPin = _confirmPinController.text.trim();
+
+    if (pin.isEmpty || confirmPin.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in both PIN fields.')),
+      );
+      return;
+    }
+
+    if (pin.length < 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN must be at least 4 digits.')),
+      );
+      return;
+    }
+
+    if (pin != confirmPin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PINs do not match. Please try again.')),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN created successfully! Please log in again.')),
+      );
+      Navigator.pop(context, true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Create Security PIN', style: TextStyle(color: Colors.white)),
+      ),
+      extendBodyBehindAppBar: true,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xff000000), Color(0xff1f0000)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 20),
+                const Text(
+                  'Set Your PIN',
+                  style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Create a secure PIN to protect your transactions and app access.',
+                  style: TextStyle(color: Colors.white60, fontSize: 14),
+                ),
+                const SizedBox(height: 40),
+                TextField(
+                  controller: _newPinController,
+                  obscureText: _obscurePin,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'Enter 4-6 digit PIN',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePin ? Icons.visibility_off : Icons.visibility, color: Colors.white54),
+                      onPressed: () => setState(() => _obscurePin = !_obscurePin),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _confirmPinController,
+                  obscureText: _obscurePin,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'Confirm PIN',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _savePin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: _loading
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('SAVE PIN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Enter PIN Screen ───────────────────────────────────────────────────────
+
+class EnterPinScreen extends StatefulWidget {
+  const EnterPinScreen({super.key});
+
+  @override
+  State<EnterPinScreen> createState() => _EnterPinScreenState();
+}
+
+class _EnterPinScreenState extends State<EnterPinScreen> {
+  final _pinController = TextEditingController();
+  bool _obscurePin = true;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
+
+  void _verifyPin() {
+    final pin = _pinController.text.trim();
+    if (pin.isEmpty || pin.length < 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your valid security PIN.')),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      setState(() => _loading = false);
+
+      bool isPinCorrect = true;
+
+      if (isPinCorrect) {
+        Navigator.pushReplacementNamed(context, '/shell');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Incorrect PIN. Please try again.')),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xff000000), Color(0xff1f0000)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              children: [
+                const Spacer(),
+                // Animated 3D Logo on Enter PIN screen
+                const AnimatedSnapWalletLogo(size: 100),
+                const SizedBox(height: 24),
+                const Text(
+                  'Enter Your PIN',
+                  style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Please enter your security PIN to unlock your wallet.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white60, fontSize: 14),
+                ),
+                const SizedBox(height: 40),
+                TextField(
+                  controller: _pinController,
+                  obscureText: _obscurePin,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'Security PIN',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePin ? Icons.visibility_off : Icons.visibility, color: Colors.white54),
+                      onPressed: () => setState(() => _obscurePin = !_obscurePin),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pushNamed(context, '/forgotPin'),
+                    child: const Text(
+                      'Forgot PIN?',
+                      style: TextStyle(color: Color(0xFFD32F2F)),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _verifyPin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: _loading
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('UNLOCK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Forgot PIN Screen ──────────────────────────────────────────────────────
+
+class ForgotPinScreen extends StatefulWidget {
+  const ForgotPinScreen({super.key});
+
+  @override
+  State<ForgotPinScreen> createState() => _ForgotPinScreenState();
+}
+
+class _ForgotPinScreenState extends State<ForgotPinScreen> {
+  final _emailController = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  void _resetPin() {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your registered email.')),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN reset instructions sent to your email!')),
+      );
+      Navigator.pop(context);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Forgot PIN', style: TextStyle(color: Colors.white)),
+      ),
+      extendBodyBehindAppBar: true,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xff000000), Color(0xff1f0000)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 20),
+                const Text(
+                  'Reset Your PIN',
+                  style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Enter your email address associated with Snap Wallet to receive PIN recovery instructions.',
+                  style: TextStyle(color: Colors.white60, fontSize: 14),
+                ),
+                const SizedBox(height: 40),
+                TextField(
+                  controller: _emailController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Email Address',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.email_outlined, color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white10,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _resetPin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: _loading
+                        ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('SUBMIT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
