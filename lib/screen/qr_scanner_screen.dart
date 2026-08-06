@@ -42,7 +42,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> with SingleTickerProv
         final String code = barcode.rawValue!;
         
         // Success feedback
-        HapticFeedback.heavyImpact();
+        HapticFeedback.vibrate();
         
         if (widget.isStandalone) {
           Navigator.pop(context, code);
@@ -134,88 +134,55 @@ class _QrScannerScreenState extends State<QrScannerScreen> with SingleTickerProv
   Widget _buildOverlay(BuildContext context) {
     final scanAreaSize = 250.0;
     
-    return Stack(
-      children: [
-        // Darkened background with a hole
-        ColorFiltered(
-          colorFilter: ColorFilter.mode(
-            Colors.black.withValues(alpha: 0.5),
-            BlendMode.srcOut,
-          ),
-          child: Stack(
-            children: [
-              Container(
-                decoration: const BoxDecoration(
-                  color: Colors.black,
-                  backgroundBlendMode: BlendMode.dstOut,
-                ),
-              ),
-              Center(
-                child: Container(
-                  width: scanAreaSize,
-                  height: scanAreaSize,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                ),
-              ),
-            ],
-          ),
+    return Center(
+      child: Container(
+        width: scanAreaSize,
+        height: scanAreaSize,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
+          borderRadius: BorderRadius.circular(24),
         ),
-        
-        // Scan Frame
-        Center(
-          child: Container(
-            width: scanAreaSize,
-            height: scanAreaSize,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Stack(
-              children: [
-                // Corner Borders
-                _buildCorner(top: true, left: true),
-                _buildCorner(top: true, right: true),
-                _buildCorner(bottom: true, left: true),
-                _buildCorner(bottom: true, right: true),
-                
-                // Animated Scan Line
-                AnimatedBuilder(
-                  animation: _animationController,
-                  builder: (context, child) {
-                    return Positioned(
-                      top: _animationController.value * (scanAreaSize - 4),
-                      left: 10,
-                      right: 10,
-                      child: Container(
-                        height: 2,
-                        decoration: BoxDecoration(
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFFD32F2F).withValues(alpha: 0.8),
-                              blurRadius: 4,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                          gradient: LinearGradient(
-                            colors: [
-                              const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                              const Color(0xFFD32F2F),
-                              const Color(0xFFD32F2F).withValues(alpha: 0.1),
-                            ],
-                          ),
+        child: Stack(
+          children: [
+            // Corner Borders
+            _buildCorner(top: true, left: true),
+            _buildCorner(top: true, right: true),
+            _buildCorner(bottom: true, left: true),
+            _buildCorner(bottom: true, right: true),
+            
+            // Animated Scan Line
+            AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return Positioned(
+                  top: _animationController.value * (scanAreaSize - 4),
+                  left: 10,
+                  right: 10,
+                  child: Container(
+                    height: 2,
+                    decoration: BoxDecoration(
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFD32F2F).withValues(alpha: 0.8),
+                          blurRadius: 4,
+                          spreadRadius: 2,
                         ),
+                      ],
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                          const Color(0xFFD32F2F),
+                          const Color(0xFFD32F2F).withValues(alpha: 0.1),
+                        ],
                       ),
-                    );
-                  },
-                ),
-              ],
+                    ),
+                  ),
+                );
+              },
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -242,12 +209,5 @@ class _QrScannerScreenState extends State<QrScannerScreen> with SingleTickerProv
         ),
       ),
     );
-  }
-}
-
-// Simple HapticFeedback fallback if not imported correctly
-class HapticFeedback {
-  static void heavyImpact() {
-    SystemChannels.platform.invokeMethod('HapticFeedback.vibrate', 'HapticFeedbackDesign.Heavy');
   }
 }
