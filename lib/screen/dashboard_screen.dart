@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../models/notification_item.dart';
+import '../models/savings_goal.dart';
 import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
 import 'accounts_screen.dart';
 import 'notifications_screen.dart';
 import 'profile_screen.dart';
+import 'savings_goals_screen.dart';
 import 'transaction_history_screen.dart';
 import 'brand_detail_screen.dart';
 import 'youtube_play_screen.dart';
@@ -423,6 +425,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<TransactionModel> _recentTx = [];
+  // Top savings goals shown in the dashboard summary card (max 3).
+  List<SavingsGoal> _topGoals = [];
   int _unreadNotifs = 0;
   bool _loading = true;
   StreamSubscription? _profileSubscription;
@@ -480,13 +484,22 @@ class _DashboardScreenState extends State<DashboardScreen>
     final user = AppState.instance.currentUser;
     if (user == null) return;
 
-    final txs = await DataService.getTransactions(user.username);
-    final unread = await DataService.getUnreadCount(user.username);
+    // Run independent fetches in parallel to keep load time short.
+    final results = await Future.wait([
+      DataService.getTransactions(user.username),
+      DataService.getUnreadCount(user.username),
+      DataService.getSavingsGoals(user.username),
+    ]);
 
     if (!mounted) return;
     setState(() {
-      _recentTx = txs.take(5).toList();
-      _unreadNotifs = unread;
+      _recentTx     = (results[0] as List<TransactionModel>).take(5).toList();
+      _unreadNotifs = results[1] as int;
+      // Show only the first 3 in-progress goals on the dashboard card.
+      _topGoals     = (results[2] as List<SavingsGoal>)
+          .where((g) => g.progress < 1.0)
+          .take(3)
+          .toList();
       _loading = false;
     });
   }
@@ -817,6 +830,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 32),
 
+                // ─── Savings Goals Summary Card ──────────────────────────────
+                // Quick overview of active goals. Tapping the header or the
+                // "See All" button navigates to the full SavingsGoalsScreen.
+                _buildSavingsSummaryCard(),
+                const SizedBox(height: 32),
+
                 // ─── Shop & Content Tabs Section ────────────────────────────
                 const Text(
                   'Shop & Entertainment',
@@ -954,6 +973,165 @@ class _DashboardScreenState extends State<DashboardScreen>
           'Ask Bot',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
+      ),
+    );
+  }
+
+  // ─── Savings Goals Summary Card ───────────────────────────────────────────
+  // Shows up to 3 active (incomplete) goals with progress bars. The card is
+  // always rendered — when there are no goals it prompts the user to create one.
+  Widget _buildSavingsSummaryCard() {
+    const red = Color(0xFFD32F2F);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section header with navigation shortcut
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.savings, color: red, size: 22),
+                SizedBox(width: 8),
+                Text(
+                  'Savings Goals',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const SavingsGoalsScreen()),
+              ).then((_) => _loadData()), // refresh when returning
+              icon: const Icon(Icons.arrow_forward_ios,
+                  size: 12, color: red),
+              label: const Text('See All',
+                  style: TextStyle(color: red)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Card body
+        GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SavingsGoalsScreen()),
+          ).then((_) => _loadData()),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: Colors.grey.withValues(alpha: 0.15)),
+            ),
+            child: _topGoals.isEmpty
+                ? _buildNoGoalsPrompt()
+                : Column(
+                    children: _topGoals
+                        .map(_buildGoalRow)
+                        .toList(),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Shown inside the card when the user has no active savings goals.
+  Widget _buildNoGoalsPrompt() {
+    return Column(
+      children: [
+        Icon(Icons.savings_outlined,
+            size: 40, color: Colors.grey.withValues(alpha: 0.5)),
+        const SizedBox(height: 10),
+        const Text(
+          'No active savings goals',
+          style: TextStyle(color: Colors.grey),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Tap here to create your first goal →',
+          style: TextStyle(
+              color: Color(0xFFD32F2F), fontSize: 13),
+        ),
+      ],
+    );
+  }
+
+  /// A compact progress row for a single goal, used inside the summary card.
+  Widget _buildGoalRow(SavingsGoal goal) {
+    const red = Color(0xFFD32F2F);
+    final pct = (goal.progress * 100).toInt();
+    final iconData = kGoalIcons[goal.icon] ?? Icons.savings;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Goal name + icon + percentage
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: red.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(iconData, color: red, size: 16),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  goal.title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '$pct%',
+                style: const TextStyle(
+                    color: red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Progress bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: goal.progress,
+              backgroundColor: Colors.grey.withValues(alpha: 0.15),
+              color: red,
+              minHeight: 7,
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Saved vs target
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                DataService.formatCurrency(goal.currentAmount),
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+              Text(
+                'of ${DataService.formatCurrency(goal.targetAmount)}',
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

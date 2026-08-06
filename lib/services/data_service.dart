@@ -1122,6 +1122,14 @@ class DataService {
         });
   }
 
+  /// Permanently removes a savings goal document from Firestore.
+  /// The caller is responsible for any UI confirmation before calling this.
+  static Future<void> deleteGoal(String goalId, String username) async {
+    final user = await _userReference(username);
+    if (user == null) return;
+    await user.collection('savings_goals').doc(goalId).delete();
+  }
+
   // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 
   static Future<List<NotificationItem>> getNotifications(

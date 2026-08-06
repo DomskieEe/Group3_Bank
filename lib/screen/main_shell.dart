@@ -11,6 +11,7 @@ import 'profile_screen.dart';
 import 'qr_scanner_screen.dart';
 import 'settings_screen.dart';
 import 'transfer_screen.dart';
+import 'savings_goals_screen.dart';
 import 'scheduled_transfers_screen.dart';
 
 class MainShell extends StatefulWidget {
@@ -28,6 +29,7 @@ class _MainShellState extends State<MainShell> {
     const TransferScreen(),
     const QrScannerScreen(isStandalone: false),
     const CardsScreen(),
+    const SavingsGoalsScreen(),
     const _MoreScreen(),
   ];
 
@@ -64,6 +66,10 @@ class _MainShellState extends State<MainShell> {
             label: 'Cards',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.savings),
+            label: 'Savings',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.menu),
             label: 'More',
           ),
@@ -94,6 +100,21 @@ class _MoreScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const ScheduledTransfersScreen()),
             ),
           ),
+          // ── Savings Goals ─────────────────────────────────────────────────
+          // Navigate to the full savings goals screen where users can create
+          // goals, deposit funds, track progress, and configure automation.
+          // ListTile(
+          //   leading: const Icon(
+          //     Icons.savings,
+          //     color: Color(0xFFD32F2F),
+          //   ),
+          //   title: const Text('Savings Goals'),
+          //   trailing: const Icon(Icons.chevron_right),
+          //   onTap: () => Navigator.push(
+          //     context,
+          //     MaterialPageRoute(builder: (_) => const SavingsGoalsScreen()),
+          //   ),
+          // ),
           ListTile(
             leading: const Icon(
               Icons.account_balance_wallet,
