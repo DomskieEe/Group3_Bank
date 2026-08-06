@@ -12,6 +12,15 @@ import '../models/notification_item.dart';
 import '../models/beneficiary.dart';
 import '../models/scheduled_transfer.dart';
 
+class AuthResult {
+  const AuthResult({this.user, this.errorCode});
+
+  final AppUser? user;
+  final String? errorCode;
+
+  bool get isSuccess => user != null;
+}
+
 class DataService {
   static const String _transactionsKey = 'ds_transactions';
   static const String _cardsKey = 'ds_cards';
@@ -23,6 +32,7 @@ class DataService {
   static const String _beneficiariesKey = 'ds_beneficiaries';
   static const String _scheduledTransfersKey = 'ds_scheduled_transfers';
   static const String _savingsAutomationKey = 'ds_savings_automation';
+  static const String _pinPrefix = 'security_pin_';
 
   static final _firestore = FirebaseFirestore.instance;
   static final _auth = FirebaseAuth.instance;
@@ -392,7 +402,9 @@ class DataService {
     return snapshot.docs.map(_userFromDocument).toList();
   }
 
-  static Future<AppUser?> login(String email, String password) async {
+  /// Signs in with Firebase Authentication then loads the matching Firestore
+  /// profile. The profile is stored at `users/<Firebase Auth UID>`.
+  static Future<AuthResult> login(String email, String password) async {
     try {
       final credential = await _auth.signInWithEmailAndPassword(
         email: email,
@@ -401,14 +413,21 @@ class DataService {
       final profile = await _users.doc(credential.user!.uid).get();
       if (!profile.exists) {
         await _auth.signOut();
-        return null;
+        return const AuthResult(errorCode: 'profile-not-found');
       }
       final user = _userFromDocument(profile);
       await processDueScheduledTransfers(user.username);
       final refreshed = await _users.doc(credential.user!.uid).get();
-      return refreshed.exists ? _userFromDocument(refreshed) : null;
-    } on FirebaseAuthException {
-      return null;
+      return refreshed.exists
+          ? AuthResult(user: _userFromDocument(refreshed))
+          : const AuthResult(errorCode: 'profile-not-found');
+    } on FirebaseAuthException catch (error) {
+      return AuthResult(errorCode: error.code);
+    } on FirebaseException catch (error) {
+      // This distinguishes a Firestore/network failure from wrong credentials.
+      return AuthResult(errorCode: error.code);
+    } catch (_) {
+      return const AuthResult(errorCode: 'unknown');
     }
   }
 
@@ -497,6 +516,39 @@ class DataService {
   static Future<void> clearSession() async {
     await _auth.signOut();
   }
+
+  // The PIN is an app-lock PIN for this device, separate from the Firebase
+  // password. It is deliberately scoped to the signed-in Firebase user.
+  static Future<bool> hasSecurityPin() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey('$_pinPrefix${user.uid}');
+  }
+
+  static Future<void> saveSecurityPin(String pin) async {
+    final user = _auth.currentUser;
+    if (user == null) throw StateError('No signed-in user');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_pinPrefix${user.uid}', pin);
+  }
+
+  static Future<bool> verifySecurityPin(String pin) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('$_pinPrefix${user.uid}') == pin;
+  }
+
+  static Future<void> clearSecurityPin() async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_pinPrefix${user.uid}');
+  }
+
+  static bool isCurrentUserEmail(String email) =>
+      _auth.currentUser?.email?.toLowerCase() == email.trim().toLowerCase();
 
   static Future<bool> sendPasswordReset(String email) async {
     try {

@@ -195,8 +195,15 @@ class _MoreScreen extends StatelessWidget {
           ),
           const Divider(),
           ListTile(
+            leading: const Icon(Icons.lock_outline, color: Color(0xFFD32F2F)),
+            title: const Text('Lock app'),
+            subtitle: const Text('Return using your security PIN'),
+            onTap: () => Navigator.pushReplacementNamed(context, '/enterPin'),
+          ),
+          ListTile(
             leading: const Icon(Icons.logout, color: Colors.grey),
             title: const Text('Logout', style: TextStyle(color: Colors.grey)),
+            subtitle: const Text('Sign out and require email and password'),
             onTap: () async {
               AppState.instance.logout();
               await DataService.clearSession();

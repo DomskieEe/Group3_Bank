@@ -222,25 +222,42 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _loading = true);
-    final user = await DataService.login(email, password);
+    final result = await DataService.login(email, password);
     if (!mounted) return;
     setState(() => _loading = false);
 
-    if (user != null) {
-      AppState.instance.currentUser = user;
-
-      // Check if user has a PIN already created.
-      bool hasPin = false; // Mock check variable, hook up your actual DataService method
-
+    if (result.isSuccess) {
+      AppState.instance.currentUser = result.user!;
+      final hasPin = await DataService.hasSecurityPin();
+      if (!mounted) return;
       if (!hasPin) {
         final pinCreated = await Navigator.pushNamed(context, '/createPin');
-        if (pinCreated != true) return;
+        if (pinCreated != true || !mounted) return;
+        Navigator.pushReplacementNamed(context, '/shell');
+        return;
       }
-
-      if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/enterPin');
     } else {
-      _showSnack('Invalid username or password.');
+      _showSnack(_loginErrorMessage(result.errorCode));
+    }
+  }
+
+  String _loginErrorMessage(String? code) {
+    switch (code) {
+      case 'invalid-credential':
+      case 'user-not-found':
+      case 'wrong-password':
+        return 'Incorrect email or password.';
+      case 'network-request-failed':
+      case 'network-error':
+      case 'unavailable':
+        return 'Unable to reach Firebase. Check your internet connection, disable VPN/private DNS, then try again.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a few minutes before trying again.';
+      case 'profile-not-found':
+        return 'Your account exists but its database profile is missing. Please contact support.';
+      default:
+        return 'Login failed. Please try again.';
     }
   }
 
@@ -402,28 +419,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                // Navigation to Create PIN or Forgot PIN screens
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/createPin'),
-                      child: const Text(
-                        'Create PIN',
-                        style: TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const Text('•', style: TextStyle(color: Colors.white54)),
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/forgotPin'),
-                      child: const Text(
-                        'Forgot PIN?',
-                        style: TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
+                TextButton(
+                  onPressed: () => _showSnack('Sign in first to create or reset your security PIN.'),
+                  child: const Text(
+                    'Create or reset PIN',
+                    style: TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold),
+                  ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
                 // Register link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -487,7 +490,9 @@ class _LoginScreenState extends State<LoginScreen> {
 // ─── Create PIN Screen ──────────────────────────────────────────────────────
 
 class CreatePinScreen extends StatefulWidget {
-  const CreatePinScreen({super.key});
+  const CreatePinScreen({super.key, this.returnToCaller = true});
+
+  final bool returnToCaller;
 
   @override
   State<CreatePinScreen> createState() => _CreatePinScreenState();
@@ -506,7 +511,7 @@ class _CreatePinScreenState extends State<CreatePinScreen> {
     super.dispose();
   }
 
-  void _savePin() {
+  Future<void> _savePin() async {
     final pin = _newPinController.text.trim();
     final confirmPin = _confirmPinController.text.trim();
 
@@ -517,9 +522,9 @@ class _CreatePinScreenState extends State<CreatePinScreen> {
       return;
     }
 
-    if (pin.length < 4) {
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PIN must be at least 4 digits.')),
+        const SnackBar(content: Text('PIN must contain 4 to 6 digits.')),
       );
       return;
     }
@@ -533,14 +538,22 @@ class _CreatePinScreenState extends State<CreatePinScreen> {
 
     setState(() => _loading = true);
 
-    Future.delayed(const Duration(seconds: 1), () {
+    try {
+      await DataService.saveSecurityPin(pin);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      if (widget.returnToCaller) {
+        Navigator.pop(context, true);
+      } else {
+        Navigator.pushReplacementNamed(context, '/enterPin');
+      }
+    } on StateError {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PIN created successfully! Please log in again.')),
+        const SnackBar(content: Text('Please sign in before creating a PIN.')),
       );
-      Navigator.pop(context, true);
-    });
+    }
   }
 
   @override
@@ -659,9 +672,9 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
     super.dispose();
   }
 
-  void _verifyPin() {
+  Future<void> _verifyPin() async {
     final pin = _pinController.text.trim();
-    if (pin.isEmpty || pin.length < 4) {
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your valid security PIN.')),
       );
@@ -670,20 +683,17 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
 
     setState(() => _loading = true);
 
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() => _loading = false);
+    final isPinCorrect = await DataService.verifySecurityPin(pin);
+    if (!mounted) return;
+    setState(() => _loading = false);
 
-      bool isPinCorrect = true;
-
-      if (isPinCorrect) {
-        Navigator.pushReplacementNamed(context, '/shell');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Incorrect PIN. Please try again.')),
-        );
-      }
-    });
+    if (isPinCorrect) {
+      Navigator.pushReplacementNamed(context, '/shell');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Incorrect PIN. Please try again.')),
+      );
+    }
   }
 
   @override
@@ -791,7 +801,7 @@ class _ForgotPinScreenState extends State<ForgotPinScreen> {
     super.dispose();
   }
 
-  void _resetPin() {
+  Future<void> _resetPin() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -800,16 +810,18 @@ class _ForgotPinScreenState extends State<ForgotPinScreen> {
       return;
     }
 
-    setState(() => _loading = true);
-
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() => _loading = false);
+    if (!DataService.isCurrentUserEmail(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PIN reset instructions sent to your email!')),
+        const SnackBar(content: Text('Enter the email of the signed-in account.')),
       );
-      Navigator.pop(context);
-    });
+      return;
+    }
+
+    setState(() => _loading = true);
+    await DataService.clearSecurityPin();
+    if (!mounted) return;
+    setState(() => _loading = false);
+    Navigator.pushReplacementNamed(context, '/createPin');
   }
 
   @override

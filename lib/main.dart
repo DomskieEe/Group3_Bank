@@ -21,6 +21,7 @@ void main() async {
       await DataService.getSensitiveDataVisible();
   final seenOnboarding = await DataService.getOnboardingSeen();
   final savedUser = await DataService.restoreSession();
+  final hasSecurityPin = savedUser != null && await DataService.hasSecurityPin();
   AppState.instance.currentUser = savedUser;
   if (savedUser != null) {
     await DataService.processDueScheduledTransfers(savedUser.username);
@@ -30,6 +31,7 @@ void main() async {
     BankingApp(
       showOnboarding: !seenOnboarding,
       startLoggedIn: savedUser != null,
+      hasSecurityPin: hasSecurityPin,
     ),
   );
 }
@@ -37,10 +39,12 @@ void main() async {
 class BankingApp extends StatelessWidget {
   final bool showOnboarding;
   final bool startLoggedIn;
+  final bool hasSecurityPin;
   const BankingApp({
     super.key,
     this.showOnboarding = true,
     this.startLoggedIn = false,
+    this.hasSecurityPin = false,
   });
 
   @override
@@ -90,11 +94,17 @@ class BankingApp extends StatelessWidget {
             '/register': (_) => const RegisterScreen(),
             '/forgot': (_) => const ForgotPasswordScreen(),
             '/shell': (_) => const MainShell(),
+            // Retained for backward-compatible navigation from older screens.
+            '/createPin': (_) => const CreatePinScreen(),
+            '/enterPin': (_) => const EnterPinScreen(),
+            '/forgotPin': (_) => const ForgotPinScreen(),
           },
           home: showOnboarding
               ? const OnboardingScreen()
               : startLoggedIn
-              ? const MainShell()
+              ? (hasSecurityPin
+                    ? const EnterPinScreen()
+                    : const CreatePinScreen(returnToCaller: false))
               : const LoginScreen(),
         );
       },
