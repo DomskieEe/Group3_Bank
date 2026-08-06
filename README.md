@@ -53,4 +53,4 @@ The app is designed to simulate a modern digital-wallet and banking experience. 
 - `pdf` and `printing` for transaction receipts and statements
 
 
-(Screenshots/accounts_screen.jpg)
+(Screenshots/accounts_screen.jpg "Optional Title")
