@@ -5,15 +5,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_user.dart';
 import '../models/transaction_model.dart';
 import '../models/bank_card.dart';
-import '../models/savings_goal.dart';
 import '../models/notification_item.dart';
+import '../models/payment_event.dart';
 
 class DataService {
   static const String _usersKey = 'ds_users';
   static const String _transactionsKey = 'ds_transactions';
   static const String _cardsKey = 'ds_cards';
-  static const String _goalsKey = 'ds_savings_goals';
   static const String _notificationsKey = 'ds_notifications';
+  static const String _paymentEventsKey = 'ds_payment_events';
   static const String _seededKey = 'ds_is_seeded_v3';
   static const String _sessionUsernameKey = 'ds_session_username';
   static const String _budgetsKey = 'ds_budgets';
@@ -262,38 +262,6 @@ class DataService {
       jsonEncode(cards.map((c) => c.toJson()).toList()),
     );
 
-    // SAVINGS GOALS
-    final goals = [
-      SavingsGoal(
-        id: 'g1',
-        username: 'dominic',
-        title: 'Emergency Fund',
-        targetAmount: 100000,
-        currentAmount: 50000,
-        icon: 'shield',
-      ),
-      SavingsGoal(
-        id: 'g2',
-        username: 'dominic',
-        title: 'Travel Fund',
-        targetAmount: 40000,
-        currentAmount: 15000,
-        icon: 'flight',
-      ),
-      SavingsGoal(
-        id: 'g3',
-        username: 'dominic',
-        title: 'New Laptop',
-        targetAmount: 60000,
-        currentAmount: 8000,
-        icon: 'laptop_mac',
-      ),
-    ];
-    await prefs.setString(
-      _goalsKey,
-      jsonEncode(goals.map((g) => g.toJson()).toList()),
-    );
-
     // NOTIFICATIONS
     final notifications = [
       NotificationItem(
@@ -343,6 +311,77 @@ class DataService {
     await prefs.setString(
       _notificationsKey,
       jsonEncode(notifications.map((n) => n.toJson()).toList()),
+    );
+
+    // PAYMENT EVENTS
+    final paymentEvents = [
+      PaymentEvent(
+        id: 'pe1',
+        username: 'dominic',
+        title: 'Flight to Cebu',
+        type: 'flight',
+        icon: 'flight',
+        date: now.add(const Duration(days: 5)),
+        amount: 3500,
+        isPaid: false,
+        note: 'Cebu Pacific - PR123',
+      ),
+      PaymentEvent(
+        id: 'pe2',
+        username: 'dominic',
+        title: 'Mom\'s Birthday Gift',
+        type: 'birthday',
+        icon: 'cake',
+        date: now.add(const Duration(days: 12)),
+        amount: 2000,
+        isPaid: false,
+      ),
+      PaymentEvent(
+        id: 'pe3',
+        username: 'dominic',
+        title: 'Netflix Subscription',
+        type: 'subscription',
+        icon: 'subscriptions',
+        date: now.add(const Duration(days: 8)),
+        amount: 549,
+        isPaid: false,
+        note: 'Monthly subscription',
+      ),
+      PaymentEvent(
+        id: 'pe4',
+        username: 'dominic',
+        title: 'Electricity Bill',
+        type: 'bill',
+        icon: 'receipt_long',
+        date: now.add(const Duration(days: 15)),
+        amount: 1800,
+        isPaid: false,
+      ),
+      PaymentEvent(
+        id: 'pe5',
+        username: 'dominic',
+        title: 'Car Insurance',
+        type: 'insurance',
+        icon: 'local_shipping',
+        date: now.add(const Duration(days: 20)),
+        amount: 5000,
+        isPaid: false,
+        note: 'Quarterly payment',
+      ),
+      PaymentEvent(
+        id: 'pe6',
+        username: 'admin',
+        title: 'Hotel Booking',
+        type: 'travel',
+        icon: 'hotel',
+        date: now.add(const Duration(days: 7)),
+        amount: 4500,
+        isPaid: false,
+      ),
+    ];
+    await prefs.setString(
+      _paymentEventsKey,
+      jsonEncode(paymentEvents.map((pe) => pe.toJson()).toList()),
     );
   }
 
@@ -627,44 +666,6 @@ class DataService {
     await _saveAllCards(list);
   }
 
-  // ─── SAVINGS GOALS ───────────────────────────────────────────────────────────
-
-  static Future<List<SavingsGoal>> getSavingsGoals(String username) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    if (data == null) return [];
-    final list = jsonDecode(data) as List;
-    return list
-        .map((e) => SavingsGoal.fromJson(e))
-        .where((g) => g.username == username)
-        .toList();
-  }
-
-  static Future<void> saveGoals(
-    List<SavingsGoal> goals,
-    String username,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString(_goalsKey);
-    final all = data != null
-        ? (jsonDecode(data) as List)
-              .map((e) => SavingsGoal.fromJson(e))
-              .toList()
-        : <SavingsGoal>[];
-    all.removeWhere((g) => g.username == username);
-    all.addAll(goals);
-    await prefs.setString(
-      _goalsKey,
-      jsonEncode(all.map((g) => g.toJson()).toList()),
-    );
-  }
-
-  static Future<void> addGoal(SavingsGoal goal) async {
-    final goals = await getSavingsGoals(goal.username);
-    goals.add(goal);
-    await saveGoals(goals, goal.username);
-  }
-
   // ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 
   static Future<List<NotificationItem>> getNotifications(
@@ -707,6 +708,65 @@ class DataService {
       _notificationsKey,
       jsonEncode(list.map((n) => n.toJson()).toList()),
     );
+  }
+
+  // ─── PAYMENT EVENTS ──────────────────────────────────────────────────────────
+
+  static Future<List<PaymentEvent>> getPaymentEvents(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_paymentEventsKey);
+    if (data == null) return [];
+    final list = jsonDecode(data) as List;
+    return list
+        .map((e) => PaymentEvent.fromJson(e))
+        .where((pe) => pe.username == username)
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date)); // Sort by date ascending
+  }
+
+  static Future<void> _saveAllPaymentEvents(List<PaymentEvent> events) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _paymentEventsKey,
+      jsonEncode(events.map((e) => e.toJson()).toList()),
+    );
+  }
+
+  static Future<void> addPaymentEvent(PaymentEvent event) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_paymentEventsKey);
+    final list = data != null
+        ? (jsonDecode(data) as List)
+            .map((e) => PaymentEvent.fromJson(e))
+            .toList()
+        : <PaymentEvent>[];
+    list.add(event);
+    await _saveAllPaymentEvents(list);
+  }
+
+  static Future<void> updatePaymentEvent(PaymentEvent updated) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_paymentEventsKey);
+    if (data == null) return;
+    final list = (jsonDecode(data) as List)
+        .map((e) => PaymentEvent.fromJson(e))
+        .toList();
+    final idx = list.indexWhere((pe) => pe.id == updated.id);
+    if (idx != -1) {
+      list[idx] = updated;
+      await _saveAllPaymentEvents(list);
+    }
+  }
+
+  static Future<void> deletePaymentEvent(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_paymentEventsKey);
+    if (data == null) return;
+    final list = (jsonDecode(data) as List)
+        .map((e) => PaymentEvent.fromJson(e))
+        .toList();
+    list.removeWhere((pe) => pe.id == id);
+    await _saveAllPaymentEvents(list);
   }
 
   // ─── SETTINGS ────────────────────────────────────────────────────────────────

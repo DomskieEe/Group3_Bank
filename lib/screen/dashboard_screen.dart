@@ -4,8 +4,11 @@ import '../models/transaction_model.dart';
 import '../services/app_state.dart';
 import '../services/data_service.dart';
 import 'accounts_screen.dart';
+import 'analytics_screen.dart';
+import 'bills_screen.dart';
 import 'notifications_screen.dart';
 import 'profile_screen.dart';
+import 'settings_screen.dart';
 import 'transaction_history_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -368,6 +371,110 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 32),
 
+                // ─── Quick Access Menu ──────────────────────────────────────
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.apps,
+                      color: Color(0xFFD32F2F),
+                      size: 22,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Quick Access',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.grey.withOpacity(0.2),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildQuickAccessButton(
+                              context,
+                              'Analytics',
+                              Icons.insights,
+                              Colors.blue,
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const AnalyticsScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildQuickAccessButton(
+                              context,
+                              'Pay Bills',
+                              Icons.receipt_long,
+                              Colors.orange,
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BillsScreen(
+                                    currentBalance: user.totalBalance,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildQuickAccessButton(
+                              context,
+                              'Notifications',
+                              Icons.notifications,
+                              Colors.purple,
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const NotificationsScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildQuickAccessButton(
+                              context,
+                              'Settings',
+                              Icons.settings,
+                              Colors.teal,
+                              () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const SettingsScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+
                 // ─── Recent Transactions Header ──────────────────────────────
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -508,6 +615,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildQuickAccessButton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: color.withOpacity(0.2),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
